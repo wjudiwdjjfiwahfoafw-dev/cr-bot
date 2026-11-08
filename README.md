@@ -1,13 +1,13 @@
 # Clash Royale Tactical AI Bot — MK Miner Skeleton Barrel Zap Bait
 
-A modular, real-time Clash Royale AI bot that plays **on a real Android device over ADB**
+A modular Clash Royale bot intended to play **on an Android device over ADB**
 (a phone, or BlueStacks / LDPlayer / MEmu / MuMu), using a **Hybrid YOLOv8/ONNX + OpenCV
 vision pipeline**, a **utility-scoring & combo-sequencing brain** tuned for the **3.3 Elixir
 Mega Knight Zap Bait** deck, and — this is what v2.1 and v2.2 rebuilt — a **capture, touch and
 troop-detection layer intended for hardware**.
 
-* **v2.1** — capture via `MultiClient`, drag-based touch injection over the scrcpy control socket,
-  measured per-device homography calibration, verified deploys.
+* **v2.1** — capture via `MultiClient`, ADB touch injection, per-device calibration, and
+  optional post-deploy checks. Calibration and touch behaviour still require device validation.
 * **v2.2** — foreground segmentation, tile-relative geometry and optional sprite matching.
   Card naming is conservative and currently unproven on real gameplay: the 55 labelled real
   crops in our check produced **0 correct names, 0 wrong names and 55 abstentions**. The
@@ -19,8 +19,8 @@ troop-detection layer intended for hardware**.
 | **Miner** | 3 | **Anti-Tornado Tower Tank & Ranged Sniper** — Rotates across 4 outer King-safe tower tiles so opponents cannot predict-catch or Tornado to King; tanks right before Skeleton Barrel pops; snipes Princess/Magic Archer/Firecracker. |
 | **Inferno Dragon** | 4 | **Flanking Tank Melter** — Deploys at outer/high-center safe anchors (`(1.4, 20.5)` / `(7.2, 20.2)`) to melt P.E.K.K.A, Golem, Giant, RG, Lava Hound, and enemy Mega Knights while baiting enemy Zap. |
 | **Skeleton Barrel** *(+ Evo)* | 3 | **Primary Bait Win Condition & Opposite-Lane Punisher** — Sequences timed **Barrel -> 1.8s Delayed Miner** combos and punishes the opposite lane whenever the opponent invests 6+ elixir in the back. |
-| **Zap** *(+ Evo)* | 2 | **Timed Reset & Swarm Clear** — Waits `~1.7–2.2s` after an enemy Inferno Tower / Inferno Dragon / Sparky locks onto our push before resetting; catches Goblin Barrels & Skarmy; holds Zap when the opponent runs Log Bait. |
-| **Bats** *(+ Evo)* | 2 | **High-DPS Air Defense & Bait Punish** — Shreds Balloons & ground rushers; rushes behind Miner/MK whenever the opponent's small spell is tracked out of cycle. |
+| **Zap** | 2 | **Timed Reset & Swarm Clear** — Waits `~1.7–2.2s` after an enemy Inferno Tower / Inferno Dragon / Sparky locks onto our push before resetting; catches Goblin Barrels & Skarmy; holds Zap when the opponent runs Log Bait. |
+| **Bats** | 2 | **High-DPS Air Defense & Bait Punish** — Shreds Balloons & ground rushers; rushes behind Miner/MK whenever the opponent's small spell is tracked out of cycle. |
 | **Spear Goblins** | 2 | **Center-Pull Kiter & Anti-Leak Cycle** — Pulls P.E.K.K.A, Prince, Mini P.E.K.K.A, and Bandit to center tiles (`(9.6, 20.6)` / `(8.4, 20.6)`) so **both Princess Towers** shoot them; splits behind King at `9.3+` elixir. |
 | **Goblin Gang** *(Goblin Army)* | 3 | **Ground Swarm & Pocket Punisher** — Body-blocks Hog Rider/Ram/Prince (crucial since this deck runs no building!) and pressures unlocked pockets when the opponent's Log/Zap is baited. *(Can be swapped to `skeleton_army` in `configs/mk_zap_bait.yaml`.)* |
 
@@ -34,10 +34,10 @@ to stop it playing; together they made it look completely inert.
 
 | # | Problem | Why it broke real play | What v2.1 does instead |
 | :-- | :--- | :--- | :--- |
-| 1 | **Card placed with two `input tap`s and a 60 ms gap** | A zero-length `DOWN/UP` pair is routinely dropped by the game, and each `input` call spawns a JVM on the device (~100-250 ms), so the gap was really 300+ ms. Taps landed after the selection had cleared. | Deploys with a **drag gesture** — press the card, glide to the tile, hold, release. That is the gesture the game is designed around. Injected over the **scrcpy control socket** (one persistent connection, sub-10 ms, real press durations), with `input swipe` and `input motionevent` as fallbacks. |
-| 2 | **Screen grabbed with `adb exec-out screencap`** | 150-400 ms round trip on a phone. The bot was permanently reasoning about a stale world: reacting to troops that had already moved and mis-reading elixir. | Live H.264 stream via **`MultiClient`** (scrcpy), decoded with PyAV into an always-latest frame buffer at 30-60 fps. Typical decision latency drops to a few milliseconds. |
-| 3 | **Arena geometry hard-coded to a 9:16 emulator** | Wrong on every real phone: different aspect ratio, HUD in different places, capture possibly downscaled. And the arena is drawn in **perspective**, so a linear tile→pixel map is off by more than a tile near the enemy side. | Geometry is **measured per device** and stored as a **homography** solved from the four Princess Towers, validated against the detected river. Hand slots, elixir bar and river line come from the frame itself. |
-| 4 | **No feedback that a touch registered** | Injected touches fail silently. One dropped play desynchronises the hand model, after which the bot "plays" cards it no longer holds — forever. | Every deploy is **verified**: the hand slot's pixels are re-inspected, and a play that did not register is retried with the next input backend and reported. |
+| 1 | **Input injection varies by device** | ADB taps and swipes can be delayed or ignored. | `tap` and `drag` styles use ADB input backends; an optional hand-change check can retry. Touch success and timing need device validation. |
+| 2 | **Repeated `screencap` is slow** | The bot may act on a stale frame. | `MultiClient` can use an H.264 capture stream, with `screencap` fallback. Capture and end-to-end decision rates depend on the device and vision workload. |
+| 3 | **Hard-coded 9:16 geometry** | Different layouts and perspective can misplace cards or deployments. | Automatic calibration tries tower, river and hand anchors. When tower fitting fails it falls back to an approximate rectangle; inspect the preview or calibrate manually. |
+| 4 | **No feedback that a touch registered** | A dropped play can desynchronise state. | The optional verifier compares the hand after a gesture and can retry; a pixel change is a heuristic, not proof of which card was played. |
 
 Bonus: the popular `scrcpy-client` Python package packs a **31-byte**
 `INJECT_TOUCH_EVENT` payload, but a scrcpy 1.24 server requires exactly **27** bytes. That
@@ -75,12 +75,13 @@ Open a **battle** (Training Camp is free) and run:
 ```bash
 python scripts/calibrate_device.py
 ```
-The bot detects the river, your four hand cards, the elixir bar and the towers, then writes
-`configs/calibration/<device>_<WxH>.json` plus a `.preview.png`.
+The calibrator attempts to locate the river, hand, elixir bar and towers and writes
+`configs/calibration/<device>_<WxH>.json` plus a `.preview.png`. It may fall back to an
+approximate rectangular arena; confidence is not a guarantee of correct geometry.
 
-**Open the preview and check it.** You should see the yellow grid following the arena, the
-cyan boxes sitting exactly on your four cards, and the red line lying on the river. If not,
-click the towers yourself — that is exact:
+**Open the preview and check it.** The yellow grid should follow the arena, the cyan boxes
+should sit on the four cards, and the red line should lie on the river. If not, click the
+four tower positions yourself and recheck the preview:
 ```bash
 python scripts/calibrate_device.py --manual
 ```
@@ -184,10 +185,10 @@ cr-bot/
 │   │   ├── sprite_matcher.py      # masked-ZNCC matching against real in-game sprite frames
 │   │   ├── game_state.py          # phases, 1x/2x/3x, 6-tower HP
 │   │   ├── elixir_tracker.py      # continuous elixir fill reader + opponent cycle
-│   │   ├── hand_detector.py       # 4-slot recogniser + deck elimination
+│   │   ├── hand_detector.py       # deck-restricted fixed-template matcher; can abstain
 │   │   └── deploy_verifier.py     # "did the card really leave the hand?"
 │   ├── brain/                     # utility planner, threat analysis, pending tracking
-│   ├── sim/                       # tick-accurate benchmark engine
+│   ├── sim/                       # approximate benchmark engine
 │   ├── ui/debug_hud.py            # live tactical overlay
 │   ├── ui_window.py               # fits every preview window to the desktop
 │   └── bot_runner.py              # main control loop
@@ -293,8 +294,8 @@ What is identical and what can differ:
 
 | | Stock app | Custom build |
 | :--- | :--- | :--- |
-| Arena geometry, card art, elixir bar, HUD layout | same | same — vision is pixel-based, no OCR of the title, no package lookups |
-| Hand cards, elixir, troop detection, calibration | works | works |
+| Arena geometry, card art, elixir bar, HUD layout | varies with version and arena | may differ further; pixel-based vision is sensitive to layout and art |
+| Hand cards, elixir, troop detection, calibration | implemented; validate on-device | implemented; validate on the actual build and layout |
 | Application id / app label / icon | `com.supercell.clashroyale` | configured list above |
 | Optional extras (mod menus, watermarks, extra buttons) | absent | anything drawn **over the arena** will be seen as an obstacle; keep overlays off the battlefield |
 
@@ -348,6 +349,13 @@ available. It confirms bar-only tracks across two frames and uses a shorter time
 These checks reduce certain false positives but can also delay or miss units. Geometry, HP, side
 and performance have not been established across phones or live matches.
 
+A separate repeat-still diagnostic highlights the remaining problem: with the default detector it
+located **1 of 8 labelled units** and produced **8 extra boxes relative to the labels**. The
+optional, off-by-default `vision.experimental_overlay_normalization` located 6/8, but one had the
+wrong side and it produced 19 extras. The stills come from one match and are not consecutive video;
+labels can be incomplete. Neither setting is established as reliable, and a quiet frame can simply
+mean a missed unit. See [the method and reports](docs/SCREENSHOT_VERIFICATION.md).
+
 ![Detector output on the labelled sample](samples/annotated/calibration_preview_scored.png)
 
 *The sample is a single training-camp still scored after warming on an **inpainted** background.
@@ -393,14 +401,37 @@ to forget samples.
 An optional trained YOLO model can provide another source of names; validate any model and its
 class mapping on your own gameplay before relying on it.
 
-### 3. Hand cards — the old templates were the problem
+### 3. Hand cards — fixed references, not deck elimination
 
-`assets/card_templates/` used to hold 96x116 crops sliced out of a low-res emulator screenshot:
-blurred, with the card border and elixir bubble baked in. Measured on the sample device frame they
-identified **1 of 4** hand cards. They are now generated from the official portrait art
-(`scripts/fetch_card_assets.py`, 72x86, 89 cards), and the recogniser restricts candidates to the
-deck it is actually playing before applying deck elimination. On the same frame: **4 of 4**
-(Skeleton Barrel, Bats, Spear Goblins, Zap), with the runner-up 0.15-0.25 behind.
+This deck is configured with **Evolution Mega Knight and Evolution Skeleton Barrel**; Bats and
+Zap are not configured as evolved. The purple-glow check is only a visual heuristic for whether
+an eligible card is currently evolved, not a guarantee that the game has those slots equipped.
+Equip the same two evolutions in the game. Bundled references do not include confirmed evolved
+portraits for either card; capture and label those appearances on your device when available.
+Until then, an evolved portrait may remain `unknown`.
+
+The matcher searches a few vertical offsets to handle raised cards, compares only templates for
+cards in the configured deck, and requires both a minimum score and a gap over the runner-up.
+Grey cards use a stricter structural match and are never marked ready. Unknown or empty slots
+are never played. It does **not** infer the fourth card by eliminating three known cards from an
+8-card deck. Some real artwork still differs from the bundled templates: capture your own with
+`scripts/capture_templates.py` when needed, and verify the calibration preview.
+
+Six independent-source spectator portraits were added with [attribution](assets/card_templates/REFERENCES.md).
+On six labelled stills the current matcher got **23/24** correct, one unknown and no wrong names;
+four frames are from the same match. The older matcher got 14/24 on those stills, including a
+Skeleton Barrel accepted by the unsafe elimination rule. The new matcher leaves that Barrel
+unknown. This tiny, correlated check does not establish performance across versions or devices:
+
+```bash
+python tools/hand_still_check.py
+python tools/paired_arena_check.py
+```
+
+Old automatic calibration files are remeasured after the calibration algorithm revision; manual
+calibrations are preserved. If automatic calibration cannot see enough anchors, the bot waits
+and retries rather than saving bad slot coordinates. `--no-calibrate` explicitly uses default
+geometry if no current calibration is available, and can therefore misalign the hand.
 
 ### Optional: YOLOv8 troop recognition
 
@@ -411,16 +442,16 @@ part of the workflow this repo recommends.
 
 ---
 
-## Empirical Proof: 340-Match Tournament Benchmark
+## Historical simulator results (not live-match proof)
 
-`cr_bot/sim/` is a tick-accurate Level 11 Tournament Standard engine (real HP/DPS/sight
-ranges, 8-card FIFO cycle, Evolutions, 1x/2x/3x elixir, Overtime & Tiebreaker, Mega Knight
-jump/stomp, 3-stage Inferno ramp & stun resets, Skeleton Barrel death spawn, Golem split, Log
-knockback, strict fog of war) with four meta-archetype opponents.
+`cr_bot/sim/` is an approximate fixed-timestep simulator, not a verified replica of current
+Clash Royale mechanics. It models some troop abilities, deck cycles and elixir. It tracks the
+selected Evolution Skeleton Barrel's cycle, but does **not** model its two-barrel evolution effect;
+evolution behaviour and balance values need independent validation.
 
-Across **340 full matches** (all bots piloting the same deck). The headline configuration is
-**unchanged by the v2.1/v2.2 real-device and detection work** — same 66/80, same per-matchup
-splits:
+The following figures were reported for an older configuration and have **not** been rerun with
+this update's Mega Knight + Skeleton Barrel evolutions. They should not be interpreted as current
+win rates or evidence of real-device performance:
 
 | Bot Configuration | Overall Win Rate | vs Hog 2.6 | vs Log Bait | vs P.E.K.K.A BS | vs Golem | Avg Crown Diff |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -441,9 +472,8 @@ Re-run with `python scripts/run_benchmark.py`, then open `benchmark_report.html`
 > (`>= 48 / 28 / 18 px`) — and the simulator draws its health bars scaled by weight class, i.e.
 > the old detector and the simulator were fitted to each other. The new detector derives the weight
 > class from the segmented sprite's height in *tiles*, so it agrees with the engine's own unit
-> sizes but no longer with the bar-width encoding. On a real device the tile-based reading is the
-> correct one; the synthetic variant is a smoke test, not a real-device measurement. The
-> 340-match headline configuration is unchanged.
+> sizes but no longer with the bar-width encoding. The synthetic variant is a smoke test, not a
+> real-device measurement; neither tile accuracy nor the old win rates are validated on a phone.
 
 ---
 
@@ -462,8 +492,8 @@ The device tests run against `calibration_preview.png` — a genuine 720x1280 Cl
 battle frame — and assert measured facts rather than renderer assumptions:
 
 * layout: river at y≈567, card centres at 224/360/496/631, cards ≈127x114;
-* the four hand cards really in the tray are **Skeleton Barrel, Bats, Spear Goblins, Zap**, and
-  `HandCardDetector` must return exactly that;
+* the four hand cards in the tray are **Skeleton Barrel, Bats, Spear Goblins, Zap**; the matcher
+  currently returns `unknown`, Bats, Spear Goblins, Zap rather than guessing the ambiguous Barrel;
 * a troop pasted into the arena must be segmented at the right place, with the right side and a
   height-derived weight class, and must keep being detected after it stops moving;
 * optional identity memory can match an explicitly supplied sample, while ambiguous automatic

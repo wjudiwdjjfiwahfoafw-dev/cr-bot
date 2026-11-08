@@ -62,6 +62,9 @@ class ArenaCalibration:
     hand_card_size_px: Optional[Tuple[float, float]] = None
     elixir_px: Optional[Tuple[float, float, float]] = None
     river_px_y: Optional[float] = None
+    # Distinct from the JSON schema version: old automatic measurements used different
+    # anchors and should be re-measured. Manually supplied calibrations remain untouched.
+    auto_revision: int = 0
     source: str = "default"
     residual_px: float = 0.0
     notes: str = ""
@@ -104,6 +107,7 @@ class ArenaCalibration:
                 else None
             ),
             river_px_y=self.river_px_y * sy if self.river_px_y is not None else None,
+            auto_revision=self.auto_revision,
             source=self.source,
             residual_px=self.residual_px,
             notes=self.notes,
@@ -113,6 +117,7 @@ class ArenaCalibration:
     def to_dict(self) -> dict:
         return {
             "version": 2,
+            "auto_revision": self.auto_revision,
             "source": self.source,
             "residual_px": self.residual_px,
             "notes": self.notes,
@@ -165,6 +170,7 @@ class ArenaCalibration:
         if data.get("elixir_px"):
             cal.elixir_px = tuple(data["elixir_px"])  # type: ignore[assignment]
         cal.river_px_y = data.get("river_px_y")
+        cal.auto_revision = int(data.get("auto_revision", 0) or 0)
         cal.source = data.get("source", "file")
         cal.residual_px = float(data.get("residual_px", 0.0) or 0.0)
         cal.notes = data.get("notes", "")

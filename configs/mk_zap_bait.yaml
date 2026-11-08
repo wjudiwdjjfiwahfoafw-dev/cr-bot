@@ -17,7 +17,7 @@ deck:
 
 evolutions:
   - mega_knight
-  - bats
+  - skeleton_barrel
 
 loop_hz: 15.0
 auto_queue_battle: false   # Set true to automatically click Battle & OK between matches
@@ -88,6 +88,7 @@ vision:
   enable_opencv_fallback: true
   unit_recognition: true    # Conservative sprite naming; false keeps all CV troops generic
   identity_learning: false # Experimental: opt in to heuristic, persistent deployment samples
+  experimental_overlay_normalization: false # Test-only; can create false/missing troops
 
 tactics:
   tower_level: 11

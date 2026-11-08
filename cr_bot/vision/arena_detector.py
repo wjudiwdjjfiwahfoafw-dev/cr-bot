@@ -265,8 +265,10 @@ class ArenaUnitBackend:
         enable_identity: bool = True,
         recognizer=None,
         enable_recognition: bool = True,
+        experimental_overlay_normalization: bool = False,
     ) -> None:
-        self.segmenter = BlobUnitDetector()
+        self.segmenter = BlobUnitDetector(
+            experimental_overlay_normalization=experimental_overlay_normalization)
         self.bar_reader = HealthBarReader()
         self.identity = identity_memory
         self.enable_segmentation = enable_segmentation
@@ -394,7 +396,7 @@ class ArenaUnitBackend:
         cx = 0.5 * (x1 + x2)
         best, best_dy = None, 1e9
         for bar in self.last_bars:
-            if not getattr(bar, "has_outline", False):
+            if not getattr(bar, "has_outline", False) or float(getattr(bar, "hue", -1.0)) < 0:
                 continue
             bx1, by1, bx2, by2 = bar.bbox
             gap = y1 - by2
@@ -641,6 +643,29 @@ class ArenaUnitBackend:
     #: The fallback's job is to keep *substantial* units visible while segmentation warms up;
     #: a 0.3-tile strip is not reliable evidence of anything, so it is not reported at all.
     MIN_FALLBACK_BAR_TILES = 0.90
+    MAX_FALLBACK_BAR_TILES = 2.6
+
+    @staticmethod
+    def _bar_in_speech_bubble(frame_bgr: np.ndarray, bar, ppt: float) -> bool:
+        """Recognise a broad white emote bubble around a supposed bars-only detection.
+
+        The white wings of a bubble are not the white digits *inside* a health bar. An emote
+        can contain coloured horizontal strokes which otherwise look like an outlined bar.
+        This test is deliberately limited to the weak bars-only path; it is not proof that
+        all emotes or snowy/white arenas are handled correctly.
+        """
+        x1, y1, x2, y2 = map(int, bar.bbox)
+        h, w = frame_bgr.shape[:2]
+        pad = max(2, int(round(1.25 * ppt)))
+        left, right = max(0, x1 - pad), min(w, x2 + pad)
+        top, bottom = max(0, y1 - pad), min(h, y2 + pad)
+        if x1 - left < pad // 2 or right - x2 < pad // 2 or bottom <= top:
+            return False
+        hsv = cv2.cvtColor(frame_bgr[top:bottom, left:right], cv2.COLOR_BGR2HSV)
+        white = (hsv[:, :, 2] > 220) & (hsv[:, :, 1] < 35)
+        a, b = white[:, :x1 - left], white[:, x2 - left:]
+        return bool(a.size and b.size and white.mean() > 0.15 and
+                    a.mean() > 0.18 and b.mean() > 0.18)
 
     @staticmethod
     def _bar_white_share(frame_bgr: np.ndarray, bar) -> float:
@@ -696,12 +721,16 @@ class ArenaUnitBackend:
         out_of_field = 0
         for bar in bars:
             x1, _y1, x2, y2 = bar.bbox
+            if bar.total_width > self.MAX_FALLBACK_BAR_TILES * ppt:
+                continue  # wide HUD/selection border, not a plausible troop health bar
+            if self._bar_in_speech_bubble(frame_bgr, bar, ppt):
+                continue
             if y2 + foot_offset > field_bottom:
                 out_of_field += 1
                 continue
             # Only a bar with the game's dark UI capsule around it is a unit's HP bar; a bare
             # coloured strip is a tower ring or a piece of decoration.
-            if not getattr(bar, "has_outline", True):
+            if not getattr(bar, "has_outline", True) or float(getattr(bar, "hue", -1.0)) < 0:
                 continue
             if (y2 - _y1) < self.MIN_FALLBACK_BAR_HEIGHT_PX:
                 continue
@@ -867,12 +896,14 @@ class HybridArenaDetector:
         enable_segmentation: bool = True,
         enable_recognition: bool = True,
         recognizer=None,
+        experimental_overlay_normalization: bool = False,
     ) -> None:
         self.grid = grid
         self.yolo = YOLOBackend(yolo_weights_path, conf_threshold=yolo_conf)
         self.cv_fallback = (
             ArenaUnitBackend(identity_memory=identity_memory, enable_segmentation=enable_segmentation,
-                             enable_recognition=enable_recognition, recognizer=recognizer)
+                             enable_recognition=enable_recognition, recognizer=recognizer,
+                             experimental_overlay_normalization=experimental_overlay_normalization)
             if enable_opencv_fallback
             else None
         )

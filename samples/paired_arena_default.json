@@ -1,0 +1,250 @@
+{
+  "method": "six repeated baseline stills followed by six repeated target stills; IoU >= 0.15, one-to-one; names not scored",
+  "warning": "Sparse correlated stills, not live video; labels may be incomplete. Extra boxes are relative to labels, not confirmed false positives.",
+  "experimental_overlay_normalization": false,
+  "calibration_stage": "anchor-rect",
+  "summary": {
+    "labelled_units": 8,
+    "matched_locations": 1,
+    "correct_sides": 1,
+    "wrong_sides": 0,
+    "misses": 7,
+    "extras_vs_labels": 8
+  },
+  "cases": [
+    {
+      "name": "same_selected_frame_with_emote",
+      "image": "20uaZJUUj9nNaRJp1Ku2.jpg",
+      "labelled_units": 0,
+      "matched_locations": 0,
+      "correct_sides": 0,
+      "wrong_sides": 0,
+      "misses": 0,
+      "extras_vs_labels": 0,
+      "matches": [],
+      "missed_labels": [],
+      "extra_detections": []
+    },
+    {
+      "name": "three_units_without_selection_overlay",
+      "image": "0JPlKsDPop5jfLGdqEya.jpg",
+      "labelled_units": 3,
+      "matched_locations": 0,
+      "correct_sides": 0,
+      "wrong_sides": 0,
+      "misses": 3,
+      "extras_vs_labels": 0,
+      "matches": [],
+      "missed_labels": [
+        {
+          "name": "musketeer",
+          "side": "enemy",
+          "bbox": [
+            189,
+            104,
+            250,
+            180
+          ]
+        },
+        {
+          "name": "ice_golem",
+          "side": "ally",
+          "bbox": [
+            423,
+            409,
+            512,
+            476
+          ]
+        },
+        {
+          "name": "hog_rider",
+          "side": "ally",
+          "bbox": [
+            413,
+            429,
+            476,
+            517
+          ]
+        }
+      ],
+      "extra_detections": []
+    },
+    {
+      "name": "one_unit_with_selection_overlay",
+      "image": "12xkBm52RVK8zKqZyGRS.jpg",
+      "labelled_units": 1,
+      "matched_locations": 1,
+      "correct_sides": 1,
+      "wrong_sides": 0,
+      "misses": 0,
+      "extras_vs_labels": 8,
+      "matches": [
+        {
+          "label": "musketeer",
+          "expected_side": "enemy",
+          "predicted_side": "enemy",
+          "predicted_name": "unknown_medium",
+          "label_bbox": [
+            125,
+            397,
+            179,
+            479
+          ],
+          "predicted_bbox": [
+            126,
+            395,
+            180,
+            493
+          ],
+          "iou": 0.809,
+          "side_correct": true
+        }
+      ],
+      "missed_labels": [],
+      "extra_detections": [
+        {
+          "bbox": [
+            118,
+            149,
+            170,
+            217
+          ],
+          "side": "enemy",
+          "name": "unknown_swarm",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            368,
+            723,
+            508,
+            821
+          ],
+          "side": "ally",
+          "name": "unknown_medium",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            36,
+            745,
+            192,
+            821
+          ],
+          "side": "ally",
+          "name": "unknown_medium",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            454,
+            615,
+            490,
+            629
+          ],
+          "side": "enemy",
+          "name": "unknown_swarm",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            288,
+            683,
+            324,
+            713
+          ],
+          "side": "ally",
+          "name": "unknown_swarm",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            132,
+            615,
+            172,
+            631
+          ],
+          "side": "enemy",
+          "name": "unknown_swarm",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            178,
+            161,
+            188,
+            173
+          ],
+          "side": "enemy",
+          "name": "unknown_swarm",
+          "source": "segmentation"
+        },
+        {
+          "bbox": [
+            444,
+            519,
+            494,
+            569
+          ],
+          "side": "enemy",
+          "name": "unknown_light",
+          "source": "segmentation"
+        }
+      ]
+    },
+    {
+      "name": "enemy_musketeer_and_three_skeletons",
+      "image": "1EiRDae0M8B3GTXWGvFD.jpg",
+      "labelled_units": 4,
+      "matched_locations": 0,
+      "correct_sides": 0,
+      "wrong_sides": 0,
+      "misses": 4,
+      "extras_vs_labels": 0,
+      "matches": [],
+      "missed_labels": [
+        {
+          "name": "musketeer",
+          "side": "enemy",
+          "bbox": [
+            143,
+            324,
+            192,
+            409
+          ]
+        },
+        {
+          "name": "skeleton",
+          "side": "enemy",
+          "bbox": [
+            440,
+            451,
+            465,
+            482
+          ]
+        },
+        {
+          "name": "skeleton",
+          "side": "enemy",
+          "bbox": [
+            466,
+            453,
+            493,
+            496
+          ]
+        },
+        {
+          "name": "skeleton",
+          "side": "enemy",
+          "bbox": [
+            433,
+            471,
+            468,
+            513
+          ]
+        }
+      ],
+      "extra_detections": []
+    }
+  ]
+}

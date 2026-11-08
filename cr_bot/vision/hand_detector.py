@@ -8,24 +8,26 @@ Two things made the original recognizer unreliable outside an emulator:
 1. It cropped each slot with hard-coded fractions of a 720x1280 frame. On a real phone the
    tray sits elsewhere and is a different size, so crops were misaligned and every match was
    noise. Crops now come from the calibrated grid (see ``cr_bot.arena.device_calibrator``).
-2. It matched a card template against a *same-size* crop with ``TM_CCOEFF_NORMED``, which for
-   equal-size images degenerates into a weak statistic. Comparison now uses a proper
-   normalised cross-correlation plus an HSV histogram correlation, and adds a **deck
-   elimination pass**: because the four hand cards are always four *distinct* cards drawn
-   from the eight-card deck, a single unrecognised slot can be filled in by elimination.
+2. A selected card moves up and matching just the stationary crop misses it. Search a
+   small range of vertical offsets, compare only the configured deck, and abstain on weak
+   or ambiguous matches. Four cards in hand are drawn from *eight*: one unknown slot cannot
+   be identified merely because the other three have been matched.
+
+The bundled variants are fixed images, not a trained classifier. Device-specific captures
+are often needed when the game artwork or screen layout changes.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from cr_bot.arena.grid import ArenaGrid
-from cr_bot.config.cards_db import get_card_info, normalize_card_name
+from cr_bot.config.cards_db import CARDS_DB, get_card_info, normalize_card_name
 from cr_bot.models import HandSlot
 
 logger = logging.getLogger(__name__)
@@ -36,10 +38,12 @@ CardDescriptor = Tuple[np.ndarray, np.ndarray]
 class HandCardDetector:
     """Identifies the 4 playable cards in hand, affordability, and active Evolution glow."""
 
-    MATCH_ACCEPT = 0.34
-    #: a slot may still be resolved below MATCH_ACCEPT when it is the only one left, because the
-    #: hand is guaranteed to be four distinct cards drawn from the eight-card deck
-    ELIMINATION_FLOOR = 0.16
+    MATCH_ACCEPT = 0.40
+    MATCH_MARGIN = 0.08
+    GRAY_ACCEPT = 0.74
+    GRAY_MARGIN = 0.10
+    # The selected card lifts above the stationary tray. These are fractions of card height.
+    VERTICAL_OFFSETS = (0.0, -0.06, -0.12, -0.18, -0.24, -0.30, 0.06)
     EVO_GLOW_ROI_SCALE = 0.12
 
     def __init__(
@@ -47,9 +51,13 @@ class HandCardDetector:
         grid: ArenaGrid,
         deck_cards: List[str],
         templates_dir: str | Path = "assets/card_templates",
+        evolutions: Optional[List[str]] = None,
     ) -> None:
         self.grid = grid
         self.deck_cards = [normalize_card_name(c) for c in deck_cards]
+        # None preserves standalone detector behaviour; a configured list restricts the
+        # purple-glow heuristic to the actual evolution slots, not ordinary Bats/Zap.
+        self.evolutions = None if evolutions is None else {normalize_card_name(c) for c in evolutions}
         self.templates_dir = Path(templates_dir)
         self._templates: Dict[str, List[CardDescriptor]] = {}
         self.reload_templates()
@@ -62,15 +70,17 @@ class HandCardDetector:
             return 0
 
         loaded = 0
+        deck = set(self.deck_cards)
+        # Match the longest known slug *before* testing deck membership. Otherwise a
+        # giant_skeleton.png template could be loaded as giant when Giant is in the deck
+        # and Giant Skeleton is not, silently teaching the wrong identity.
+        names = sorted(set(CARDS_DB) | deck, key=lambda name: (-len(name), name))
         for img_path in sorted(self.templates_dir.glob("*.png")):
             stem = img_path.stem.lower()
-            matched_card = None
-            for deck_card in self.deck_cards:
-                if stem == deck_card or stem.startswith(deck_card + "_"):
-                    matched_card = deck_card
-                    break
-            if matched_card is None:
-                matched_card = normalize_card_name(stem)
+            matched_card = next((name for name in names
+                                 if stem == name or stem.startswith(name + "_")), None)
+            if matched_card not in deck:
+                continue  # Never fall back to templates for cards outside the configured deck.
 
             img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
             if img is None:
@@ -134,99 +144,94 @@ class HandCardDetector:
 
     # -- detection -----------------------------------------------------------------
     def detect_hand(self, frame_bgr: np.ndarray, current_elixir: float) -> List[HandSlot]:
-        """Classify all 4 hand slots with 1-to-1 uniqueness across the 8-card deck."""
-        crops = [self.crop_slot(frame_bgr, i) for i in range(4)]
+        """Identify only well-supported, distinct deck cards; never guess an unknown slot.
 
-        if not self._templates:
-            return self._fallback_hand(frame_bgr, crops, current_elixir)
+        Search a small vertical range to cover raised cards. A per-slot margin prevents a
+        look-alike from being selected merely because a stronger slot used the best match.
+        When two slots claim the same card, keep the stronger claim and leave the other
+        unknown. Unknown/empty slots are never actionable, even if their blue background is
+        highly saturated. Disabled (grey) cards are scored by structure, with a higher gate.
+        """
+        crops = [self.crop_slot(frame_bgr, i) for i in range(4)]
+        pool = list(dict.fromkeys(c for c in self.deck_cards if c in self._templates))
+        claims: List[Tuple[float, int, str]] = []
+        h, w = frame_bgr.shape[:2]
+        for idx, crop in enumerate(crops):
+            if crop.size == 0 or not pool:
+                continue
+            x1, y1, x2, y2 = self.grid.hand_slot_rect(idx)
+            card_h = y2 - y1
+            grey = not self._is_slot_saturated(crop)
+            scores = {card: 0.0 for card in pool}
+            for fraction in self.VERTICAL_OFFSETS:
+                dy = int(round(fraction * card_h))
+                if y1 + dy < 0 or y2 + dy > h or x1 < 0 or x2 > w:
+                    continue
+                shifted = frame_bgr[y1 + dy:y2 + dy, x1:x2]
+                if shifted.size == 0:
+                    continue
+                desc = self._prepare_descriptor(shifted)
+                for card in pool:
+                    if grey:
+                        # An HSV histogram of a grey card carries essentially no identity
+                        # information. Comparing it to another grey histogram can produce a
+                        # spurious perfect match, so use the portrait structure alone.
+                        score = max(
+                            float(cv2.matchTemplate(desc[0], ref[0], cv2.TM_CCOEFF_NORMED)[0, 0])
+                            for ref in self._templates[card]
+                        )
+                    else:
+                        score = self._best_score(desc, card)
+                    scores[card] = max(scores[card], score)
+            ranked = sorted(((score, card) for card, score in scores.items()), reverse=True)
+            if not ranked:
+                continue
+            score, card = ranked[0]
+            second = ranked[1][0] if len(ranked) > 1 else 0.0
+            threshold = self.GRAY_ACCEPT if grey else self.MATCH_ACCEPT
+            margin = self.GRAY_MARGIN if grey else self.MATCH_MARGIN
+            if score >= threshold and score - second >= margin:
+                claims.append((score, idx, card))
 
         assigned: Dict[int, Tuple[str, float]] = {}
-        if all(c.size > 0 for c in crops):
-            pairs: List[Tuple[float, int, str]] = []
-            descriptors = [self._prepare_descriptor(c) for c in crops]
-            # The tray can only ever show cards from the deck: restricting the candidate pool to
-            # the deck removes most confusions with look-alike cards that can never appear here.
-            deck_pool = [c for c in self.deck_cards if c in self._templates]
-            pool = deck_pool if len(deck_pool) >= 4 else list(self._templates)
-            for idx, desc in enumerate(descriptors):
-                for card_name in pool:
-                    variants = self._templates[card_name]
-                    best = max(self._similarity(desc, v) for v in variants)
-                    pairs.append((best, idx, card_name))
-
-            pairs.sort(key=lambda p: p[0], reverse=True)
-            used_cards = set()
-            for score, slot_idx, card_name in pairs:
-                if slot_idx in assigned or card_name in used_cards:
-                    continue
-                if score < self.MATCH_ACCEPT:
-                    continue
-                assigned[slot_idx] = (card_name, round(score, 3))
-                used_cards.add(card_name)
-                if len(assigned) == 4:
-                    break
-
-            # Deck elimination: the hand is always 4 distinct cards from the 8-card deck, so the
-            # last unresolved slot can be settled from what is left even with a weak raw score.
-            missing_slots = [i for i in range(4) if i not in assigned]
-            remaining = [c for c in self.deck_cards if c not in used_cards]
-            if len(missing_slots) == 1 and remaining:
-                slot_idx = missing_slots[0]
-                best_left = max(
-                    ((self._best_score(descriptors[slot_idx], c), c) for c in remaining
-                     if c in self._templates),
-                    default=(0.0, ""),
-                )
-                if best_left[1] and best_left[0] >= self.ELIMINATION_FLOOR:
-                    assigned[slot_idx] = (best_left[1], round(max(0.45, best_left[0]), 3))
-                    logger.debug("Filled hand slot %d by deck elimination -> %s (%.3f)",
-                                 slot_idx, best_left[1], best_left[0])
+        used = set()
+        for score, idx, card in sorted(claims, reverse=True):
+            if card not in used:
+                assigned[idx] = (card, round(score, 3))
+                used.add(card)
 
         results: List[HandSlot] = []
-        for idx in range(4):
+        for idx, crop in enumerate(crops):
             card_name, conf = assigned.get(idx, ("unknown", 0.0))
             info = get_card_info(card_name)
-            saturated = self._is_slot_saturated(crops[idx])
-            affordable = (current_elixir + 0.15 >= float(info.elixir)) if card_name != "unknown" else saturated
+            saturated = self._is_slot_saturated(crop)
+            affordable = current_elixir + 0.15 >= float(info.elixir)
             results.append(
                 HandSlot(
                     slot_index=idx,
                     card_name=card_name,
                     elixir_cost=info.elixir,
-                    is_ready=bool(saturated and affordable),
-                    is_evolved=self._has_evo_glow(frame_bgr, idx),
+                    is_ready=bool(card_name != "unknown" and saturated and affordable),
+                    is_evolved=bool(card_name != "unknown" and
+                                    (self.evolutions is None or card_name in self.evolutions) and
+                                    self._has_evo_glow(frame_bgr, idx)),
                     confidence=conf,
                     tap_xy=self.grid.hand_slot_pixel(idx),
                 )
             )
         return results
 
-    def _fallback_hand(
-        self, frame_bgr: np.ndarray, crops: List[np.ndarray], current_elixir: float
-    ) -> List[HandSlot]:
-        """Without templates, still expose slot geometry + readiness so calibration works."""
-        out: List[HandSlot] = []
-        for idx in range(4):
-            out.append(
-                HandSlot(
-                    slot_index=idx,
-                    card_name="unknown",
-                    elixir_cost=3,
-                    is_ready=self._is_slot_saturated(crops[idx]),
-                    is_evolved=self._has_evo_glow(frame_bgr, idx),
-                    confidence=0.0,
-                    tap_xy=self.grid.hand_slot_pixel(idx),
-                )
-            )
-        return out
-
     # -- pixel helpers ---------------------------------------------------------------
     @staticmethod
     def _is_slot_saturated(crop_bgr: np.ndarray) -> bool:
-        """Cards you cannot afford are desaturated/greyed out."""
+        """Test the art, not the blue tray around it, for the grey unaffordable state."""
         if crop_bgr.size == 0:
             return False
-        hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
+        h, w = crop_bgr.shape[:2]
+        inner = crop_bgr[int(0.12 * h):int(0.76 * h), int(0.10 * w):int(0.90 * w)]
+        if inner.size == 0:
+            return False
+        hsv = cv2.cvtColor(inner, cv2.COLOR_BGR2HSV)
         return float(np.mean(hsv[:, :, 1])) >= 46.0
 
     def _has_evo_glow(self, frame_bgr: np.ndarray, slot_index: int) -> bool:

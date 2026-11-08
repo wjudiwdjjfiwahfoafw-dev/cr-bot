@@ -1335,16 +1335,36 @@ class ArenaStructureSuppressor:
         return None
 
     def suppress(self, units: Sequence["BlobUnit"], grid: ArenaGrid) -> List["BlobUnit"]:
-        """Drop units that are really structures. Units *with* a health bar are kept.
+        """Suppress candidates at projected structures unless a non-tower bar backs them.
 
-        A health bar is the game's own statement that this is a troop with HP, and towers draw
-        their bar at their feet rather than at blob centre; keeping barred units means a troop
-        garrisoned right next to a tower is never silently deleted.
+        Tower bars can also look like troop bars. This heuristic trades false positives for a
+        risk of missing troops overlapping a tower, particularly with approximate calibration;
+        it must not be treated as proof that a nearby detection is or is not a troop.
         """
         kept: List["BlobUnit"] = []
+        ppt = max(1.0, float(pixels_per_tile(grid)))
         for unit in units:
             structure = self.is_structure(unit.tile_x, unit.tile_y, grid)
-            if structure is None or getattr(unit, "has_bar", False):
+            if structure is None:
+                kept.append(unit)
+                continue
+            # A Princess Tower's own wide HP bar was previously treated as proof that an
+            # animated part of the tower was a troop. A narrower/off-tower bar can still be
+            # a troop fighting there, so retain it; only reject a substantial bar whose own
+            # centre also lies near this tower. This is conservative and can still miss an
+            # unusually large troop overlapping a tower, especially with an approximate grid.
+            tower_x, tower_y = grid.TOWER_TILES[structure]
+            independent_bar = False
+            for bar in getattr(unit, "bars", []) or []:
+                x1, y1, x2, y2 = bar.bbox
+                bx, by = grid.pixel_to_tile((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+                tower_bar = ((x2 - x1) >= 1.8 * ppt and
+                             math.hypot(bx - tower_x, by - tower_y) <= 2.0 and
+                             by <= tower_y + 0.6)
+                if not tower_bar:
+                    independent_bar = True
+                    break
+            if independent_bar or (getattr(unit, "has_bar", False) and not getattr(unit, "bars", None)):
                 kept.append(unit)
             else:
                 logger.debug(
@@ -1391,11 +1411,15 @@ class BlobUnitDetector:
         bar_reader: Optional[HealthBarReader] = None,
         diff_threshold: float = 20.0,
         team: Optional[TeamClassifier] = None,
+        experimental_overlay_normalization: bool = False,
     ) -> None:
         self.background = background if background is not None else ArenaBackgroundModel(
             diff_threshold=diff_threshold)
         self.bars = bar_reader if bar_reader is not None else HealthBarReader()
         self.team = team if team is not None else TeamClassifier()
+        # Unvalidated on continuous gameplay; opt in only for an instrumented comparison.
+        self.experimental_overlay_normalization = bool(experimental_overlay_normalization)
+        self._overlay_normalised = False
         #: towers/bridges differ from the learned floor too, but they are not troops
         self.structures = ArenaStructureSuppressor()
         self.last_bars: List[HealthBar] = []
@@ -1421,11 +1445,32 @@ class BlobUnitDetector:
             self.background.set_tile_scale(cached * self.WORK_SCALE)
         return cached
 
+    @staticmethod
+    def _arena_roi_bounds(frame_bgr: np.ndarray, grid: ArenaGrid) -> Tuple[int, int, int, int]:
+        """Constrain the *segmentation* ROI, without changing the tile projection.
+
+        A river/card-row fallback projection intentionally spans a little beyond the field;
+        feeding its whole rectangle to background subtraction also includes nameplates and
+        the card tray. Clip those pixels for this approximate projection only. A manually
+        calibrated/homography arena keeps its original bounds.
+        """
+        h, w = frame_bgr.shape[:2]
+        ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
+        cal = grid.cal
+        if (cal.source == "auto" and "fallback rect" in cal.notes and
+                cal.hand_slots_px and cal.river_px_y is not None):
+            hand_top = min(grid.hand_slot_rect(i)[1] for i in range(4))
+            field_bottom = hand_top - int(round(0.090 * h))
+            field_top = int(round(2.0 * cal.river_px_y - field_bottom))
+            # The fallback projection starts at 2% width, whereas arena walls generally start
+            # further inward. This guards the changing HUD/ornament strip along each edge.
+            ax1, ax2 = max(ax1, int(0.06 * w)), min(ax2, int(0.94 * w))
+            ay1, ay2 = max(ay1, field_top), min(ay2, field_bottom)
+        return max(0, ax1), max(0, ay1), min(w, ax2), min(h, ay2)
+
     def seed_background(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> bool:
         """Prime the model with a known-empty arena frame (e.g. right after a match starts)."""
-        ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
-        ax1, ay1 = max(0, ax1), max(0, ay1)
-        ax2, ay2 = min(frame_bgr.shape[1], ax2), min(frame_bgr.shape[0], ay2)
+        ax1, ay1, ax2, ay2 = self._arena_roi_bounds(frame_bgr, grid)
         if ax2 - ax1 < 40 or ay2 - ay1 < 40:
             return False
         roi = frame_bgr[ay1:ay2, ax1:ax2]
@@ -1445,12 +1490,99 @@ class BlobUnitDetector:
         self.background._frames_seen = 99
         return True
 
+    def _normalise_overlay(self, small: np.ndarray, river_row: int) -> np.ndarray:
+        """Align a broad, affine colour cast to the learned background before differencing.
+
+        Selecting a card can tint the entire enemy half red. Treating that as a scene shift
+        causes a re-learn and may absorb actual troops. Fit each half independently using a
+        robust per-channel linear fit of corresponding pixels; apply it only if a majority of
+        sampled pixels agree and the median difference drops substantially. This is not used
+        for team-colour inference, which always reads the original frame. It cannot handle
+        arbitrary overlays, lighting or a different camera pose; those still use the shift guard.
+        """
+        background = self.background._background
+        if background is None or background.shape != small.shape or small.ndim != 3:
+            self._overlay_normalised = False
+            return small
+        height, width = small.shape[:2]
+        river_row = max(0, min(height, int(river_row)))
+        output = None
+        self._overlay_normalised = False
+        for y1, y2 in ((0, river_row), (river_row, height)):
+            if y2 - y1 < 20:
+                continue
+            step = max(2, min(width, y2 - y1) // 60)
+            x = small[y1:y2:step, ::step].reshape(-1, 3).astype(np.float32)
+            y = background[y1:y2:step, ::step].reshape(-1, 3)
+            if len(x) < 50:
+                continue
+            before = float(np.median(np.mean(np.abs(x - y), axis=1)))
+            if before < 10.0:
+                continue
+            slopes, offsets = [], []
+            for channel in range(3):
+                xc, yc = x[:, channel], y[:, channel]
+                good = np.ones(len(xc), dtype=bool)
+                slope, offset = 1.0, 0.0
+                for _ in range(3):
+                    a, b = xc[good], yc[good]
+                    var = float(np.var(a))
+                    if len(a) < 20 or var < 4.0:
+                        break
+                    slope = float(np.mean((a - a.mean()) * (b - b.mean())) / var)
+                    offset = float(b.mean() - slope * a.mean())
+                    error = np.abs(slope * xc + offset - yc)
+                    good = error <= max(8.0, float(np.percentile(error, 70)))
+                slopes.append(slope)
+                offsets.append(offset)
+            if any(not 0.30 <= s <= 2.8 for s in slopes):
+                continue
+            mapped = np.clip(x * slopes + offsets, 0.0, 255.0)
+            residual = np.abs(mapped - y)
+            after = float(np.median(np.mean(residual, axis=1)))
+            agreement = float(np.mean(np.max(residual, axis=1) < 18.0))
+            if after > before * 0.55 or agreement < 0.55:
+                continue
+            if output is None:
+                output = small.copy()
+            self._overlay_normalised = True
+            values = np.arange(256, dtype=np.float32)
+            for channel, (slope, offset) in enumerate(zip(slopes, offsets)):
+                lut = np.clip(values * slope + offset, 0, 255).astype(np.uint8)
+                output[y1:y2, :, channel] = cv2.LUT(small[y1:y2, :, channel], lut)
+            # The selection tint covers the *floor*, but often not towers, HUD or sprites.
+            # Do not apply the floor transform to an un-tinted feature that already agrees
+            # better with the reference. This also avoids manufacturing tower-shaped blobs.
+            ref = np.clip(background[y1:y2], 0, 255).astype(np.uint8)
+            raw_delta = np.max(cv2.absdiff(small[y1:y2], ref), axis=2)
+            mapped_delta = np.max(cv2.absdiff(output[y1:y2], ref), axis=2)
+            use_raw = raw_delta <= mapped_delta
+            output[y1:y2][use_raw] = small[y1:y2][use_raw]
+        return small if output is None else output
+
+    @staticmethod
+    def _distributed_change(state: np.ndarray) -> bool:
+        """Corroborate a previously triggered viewpoint move against the frozen background.
+
+        One-pixel shifts can round to zero in the phase estimate, yet leave weak differences
+        distributed across the board after frame-to-frame motion has ceased. A single troop is
+        normally localized; this is only used *after* a global-motion trigger. It is still a
+        heuristic: many simultaneous changes can suppress real units until the scene settles.
+        """
+        changed = state != BG_BACKGROUND
+        if changed.size == 0:
+            return False
+        fractions = np.asarray([
+            float(cell.mean()) for row in np.array_split(changed, 6, axis=0)
+            for cell in np.array_split(row, 6, axis=1) if cell.size
+        ])
+        return bool(fractions.size and np.median(fractions) > 0.030 and
+                    np.mean(fractions > 0.05) > 0.35)
+
     # -- main entry -----------------------------------------------------------------
     def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid, observe: bool = True) -> List[BlobUnit]:
         ppt = self.tiles_per_pixel(grid)
-        ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
-        ax1, ay1 = max(0, ax1), max(0, ay1)
-        ax2, ay2 = min(frame_bgr.shape[1], ax2), min(frame_bgr.shape[0], ay2)
+        ax1, ay1, ax2, ay2 = self._arena_roi_bounds(frame_bgr, grid)
         if ax2 - ax1 < 40 or ay2 - ay1 < 40:
             return []
 
@@ -1462,15 +1594,21 @@ class BlobUnitDetector:
             if scale < 1.0 else roi
         )
         self.background.set_tile_scale(ppt * scale)
+        self._overlay_normalised = False
+        if self.experimental_overlay_normalization:
+            river_row = int(round((grid.river_pixel_y - ay1) * scale))
+            model_frame = self._normalise_overlay(small, river_row)
+        else:
+            model_frame = small
 
         # Keep the model on a fixed viewpoint: a streamed or hand-held capture wobbles by a
         # pixel or two, and uncompensated that turns every arena edge into a phantom troop.
-        self._last_shift = self.background.confirmed_shift(small)
+        self._last_shift = self.background.confirmed_shift(model_frame)
 
         ready = self.background.is_ready
-        state = self.background.state(small) if ready else np.full(
+        state = self.background.state(model_frame) if ready else np.full(
             small.shape[:2], BG_UNKNOWN, np.uint8)
-        motion = self.background.motion(small) if ready else np.zeros(small.shape[:2], np.uint8)
+        motion = self.background.motion(model_frame) if ready else np.zeros(small.shape[:2], np.uint8)
         # NB: this deliberately does not look at the raw shift *estimate*: phase correlation
         # returns a non-zero offset for plenty of ordinary frames (a troop appearing is enough),
         # and acting on that would drop good frames. Only the corroborated estimate counts, plus
@@ -1483,6 +1621,8 @@ class BlobUnitDetector:
             # to read: *motion* across most of the arena at once (every edge moves). Troops
             # arriving never cover a quarter of the board; a camera move always does.
             moved = float(np.count_nonzero(motion)) / float(motion.size) > self.MOTION_SHIFT_FRACTION
+            if not moved and self._shifted_frames and not self._overlay_normalised:
+                moved = self._distributed_change(state)
         if ready and moved:
             # The arena moved under the model this frame: a scroll, a zoom, or a viewpoint
             # wobble. *Everything* differs from both the background and the previous frame, and
@@ -1502,21 +1642,42 @@ class BlobUnitDetector:
                             "arena", self._shifted_frames)
                 self.background.reset()
                 self._shifted_frames = 0
-            self.background.update(small, np.full(small.shape[:2], 255, np.uint8))
+            self.background.update(model_frame, np.full(small.shape[:2], 255, np.uint8))
             return []
         self._shifted_frames = 0
 
         units: List[BlobUnit] = []
+        verified_bars: List[HealthBar] = []
         if ready:
             # Bars are read in *big* coordinates: their colour is the least ambiguous team
             # evidence available, so they are also used as anchors for splitting blobs.
+            # Only actual, outlined, team-coloured capsules may split a blob or vote on its
+            # side. Bare decorative strips (and uncoloured rows with hue -1) were being
+            # treated as authoritative health bars and flipping an enemy into an ally.
             self.last_bars = self.bars.read(frame_bgr, grid, ppt)
-            if self.last_bars:
+            verified_bars = [b for b in self.last_bars if b.has_outline and b.hue >= 0]
+            if verified_bars:
                 self.background._barred = self._bar_protection(
-                    self.last_bars, small.shape, (ax1, ay1), scale, ppt)
+                    verified_bars, small.shape, (ax1, ay1), scale, ppt)
             mask = self._detection_mask(state, motion)
+            if self._overlay_normalised:
+                # A selected-card boundary is a long, thin screen-wide line, not a unit. It
+                # can join the river and distant troops into one giant rejected component.
+                # Only remove such lines in the colour-cast transition, not ordinary frames.
+                mh, mw = mask.shape
+                horizontal = cv2.morphologyEx(
+                    mask, cv2.MORPH_OPEN,
+                    cv2.getStructuringElement(cv2.MORPH_RECT, (max(20, mw // 5), 1)),
+                )
+                vertical = cv2.morphologyEx(
+                    mask, cv2.MORPH_OPEN,
+                    cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(20, mh // 6))),
+                )
+                lines = cv2.bitwise_or(horizontal, vertical)
+                lines = cv2.dilate(lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+                mask = cv2.bitwise_and(mask, cv2.bitwise_not(lines))
             units = self._from_mask(
-                mask, motion, roi, small, grid, ppt, (ax1, ay1), scale, self.last_bars
+                mask, motion, roi, small, grid, ppt, (ax1, ay1), scale, verified_bars
             )
             # a blob that is only moving cannot be seen by the background model yet (it is
             # indistinguishable from arena until it moves), so it is added on top
@@ -1526,12 +1687,12 @@ class BlobUnitDetector:
         if observe:
             # only learn where we are *certain* it is background; UNKNOWN must not be adopted
             guard = np.where(state == BG_BACKGROUND, 0, 255).astype(np.uint8) if ready else None
-            if ready and self.last_bars:
-                # a health bar is proof of a unit: never let that patch become "arena floor"
+            if ready and verified_bars:
+                # Only outlined, coloured candidates protect a patch from absorption.
                 self.background.protect_from_absorb(
-                    self._bar_protection(self.last_bars, small.shape, (ax1, ay1), scale, ppt)
+                    self._bar_protection(verified_bars, small.shape, (ax1, ay1), scale, ppt)
                 )
-            self.background.update(small, guard)
+            self.background.update(model_frame, guard)
         return units
 
     #: two detections closer than this (feet, in tiles) are the same troop seen twice; scaled
@@ -1655,7 +1816,9 @@ class BlobUnitDetector:
                 continue
             height_tiles = max(0.4, (box[3] - box[1]) / ppt)
             weight_class, name = classify_size(height_tiles)
-            vote = self.team.classify(roi, box, None, None, None, tile_y)
+            # ``roi`` starts at (ax1, ay1); the team classifier must receive ROI-local
+            # coordinates, while the emitted detection keeps full-frame coordinates.
+            vote = self.team.classify(roi, (x, y, x + w, y + h), None, None, None, tile_y)
             added.append(
                 BlobUnit(
                     bbox=box,
@@ -1696,11 +1859,14 @@ class BlobUnitDetector:
             # a sprite, so it belongs to that sprite
             filled = np.zeros(state.shape, np.uint8)
             filled[front] = 255
-            ff = filled.copy()
-            h, w = ff.shape
-            flood = np.zeros((h + 2, w + 2), np.uint8)
+            # Flood-fill from a guaranteed *outside* pixel. If a foreground object touches
+            # (0, 0), filling from that pixel instead marks virtually the entire background as
+            # a "hole" and the resulting enormous contour can swallow every real unit.
+            h, w = filled.shape
+            ff = cv2.copyMakeBorder(filled, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+            flood = np.zeros((h + 4, w + 4), np.uint8)
             cv2.floodFill(ff, flood, (0, 0), 255)
-            holes = cv2.bitwise_not(ff) & 255
+            holes = cv2.bitwise_not(ff[1:-1, 1:-1])
             mask = cv2.bitwise_or(mask, holes)
             mask[moving & unknown] = 255
         return mask
@@ -1722,10 +1888,17 @@ class BlobUnitDetector:
         if mask.size == 0:
             return []
         k = 5 if scale < 1.0 else 3
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
-                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,
-                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        if self._overlay_normalised:
+            # Experimental: a long overlay seam can otherwise join the entire river and
+            # multiple sprites. Opening first can also erase small troops, so only try it
+            # alongside the explicitly enabled overlay normalization.
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+        else:
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel)
 
         inv = 1.0 / scale
         s_ppt = ppt * scale                     # tiles -> small pixels
@@ -1766,7 +1939,7 @@ class BlobUnitDetector:
         for bbox, cnt, _ in candidates:
             inside = [entry for entry in bars_small
                       if bbox[0] - 2 <= entry[1] <= bbox[2] + 2
-                      and bbox[1] - 2 * s_ppt <= entry[2] <= bbox[3] + 2]
+                      and bbox[1] - self.BAR_MAX_GAP_TILES * s_ppt <= entry[2] <= bbox[3] + 2]
             if len(inside) < 2:
                 split_out.append((bbox, cnt, inside[0][0] if inside else None, None))
                 continue

@@ -29,6 +29,7 @@ import numpy as np
 
 from cr_bot.adb.controller import ADBController
 from cr_bot.arena.device_calibrator import (
+    AUTO_CALIBRATION_REVISION,
     CalibrationResult,
     DeviceCalibrator,
     calibration_path,
@@ -138,6 +139,7 @@ class ClashRoyaleBotRunner:
         self._last_menu_click_ts = 0.0
         self.matches_played = 0
         self._calibrated_this_match = False
+        self._last_calibration_attempt_ts = -999.0
 
         # Async deploy plumbing
         self._deploy_lock = threading.Lock()
@@ -194,7 +196,8 @@ class ClashRoyaleBotRunner:
         self.elixir_reader = ElixirReader(grid.cal, grid=grid)
         self.opp_tracker = OpponentTracker(bait_window_seconds=cfg.bait_window_seconds)
         self.hand_detector = HandCardDetector(
-            grid, deck_cards=cfg.normalized_deck(), templates_dir=cfg.templates_dir
+            grid, deck_cards=cfg.normalized_deck(), templates_dir=cfg.templates_dir,
+            evolutions=cfg.evolutions,
         )
         self.identity = UnitIdentityMemory(
             directory=cfg.identity_dir, namespace=self._identity_namespace(grid),
@@ -206,6 +209,7 @@ class ClashRoyaleBotRunner:
             enable_opencv_fallback=cfg.enable_opencv_fallback,
             identity_memory=self.identity if cfg.enable_identity_learning else None,
             enable_recognition=cfg.enable_unit_recognition,
+            experimental_overlay_normalization=cfg.experimental_overlay_normalization,
         )
         self.brain = MKZapBaitBrain(grid, config=cfg, adb_latency_sec=cfg.adb_latency_sec)
         label = (
@@ -286,43 +290,65 @@ class ClashRoyaleBotRunner:
         w, h = self.adb.frame_size
         return calibration_path(self.cfg.calibration_dir, self.adb.serial, w, h)
 
-    def ensure_calibration(self, frame: np.ndarray, interactive_hint: bool = True) -> None:
-        """Load a saved calibration for this device, or measure one from ``frame``."""
+    def ensure_calibration(self, frame: np.ndarray, interactive_hint: bool = True) -> bool:
+        """Load trustworthy geometry, or retry measurement when anchors are obscured.
+
+        Returns False until automatic calibration has a hand row and some arena evidence. In
+        that case the caller must not make a deployment from the default/stale geometry.
+        """
         if self._calibrated_this_match:
-            return
-        self._calibrated_this_match = True
+            return True
+        if self.auto_calibrate and time.monotonic() - self._last_calibration_attempt_ts < 0.75:
+            return False
 
         if not self.force_recalibrate:
-            saved = load_calibration(self._calibration_file())
-            if saved is not None and saved.frame_size is not None:
+            file_path = self._calibration_file()
+            candidates = [(file_path, load_calibration(file_path), False)]
+            portable_path = Path(self.cfg.calibration_dir) / "default.json"
+            candidates.append((portable_path, load_calibration(portable_path), True))
+            for path, saved, portable in candidates:
+                if saved is None:
+                    continue
+                if saved.source == "auto" and (
+                    saved.auto_revision < AUTO_CALIBRATION_REVISION or
+                    not saved.hand_slots_px or len(saved.hand_slots_px) != 4
+                ):
+                    logger.info("Ignoring stale/incomplete auto-calibration %s; remeasuring", path)
+                    continue
+                if not portable and saved.frame_size != self.adb.frame_size:
+                    logger.warning("Ignoring calibration %s with a different/missing frame size", path)
+                    continue
+                if portable and saved.frame_size and saved.frame_size != self.adb.frame_size:
+                    saved = saved.scaled(*self.adb.frame_size)
                 self.apply_calibration(saved)
-                logger.info("Loaded saved calibration from %s", self._calibration_file())
-                return
-            portable = load_calibration(Path(self.cfg.calibration_dir) / "default.json")
-            if saved is None and portable is not None:
-                if portable.frame_size and portable.frame_size != self.adb.frame_size:
-                    portable = portable.scaled(*self.adb.frame_size)
-                self.apply_calibration(portable)
-                logger.info("Loaded portable calibration (configs/calibration/default.json)")
-                return
+                self._calibrated_this_match = True
+                logger.info("Loaded %s calibration from %s", "portable" if portable else "saved", path)
+                return True
 
         if not self.auto_calibrate:
-            logger.warning(
-                "No calibration for this device and auto-calibration is disabled. "
-                "Run `python scripts/calibrate_device.py` first."
-            )
-            return
+            logger.warning("No current calibration; --no-calibrate uses the bundled default geometry.")
+            self._calibrated_this_match = True
+            return True
 
+        # Grey cards, a selected card, an emote, or the opening transition can obscure the
+        # badges. Never persist that first partial measurement and never act on it; retry once
+        # the board becomes visible. Throttle to avoid spending the entire frame budget here.
+        now = time.monotonic()
+        if now - self._last_calibration_attempt_ts < 0.75:
+            return False
+        self._last_calibration_attempt_ts = now
         result = DeviceCalibrator().calibrate(frame)
         self.calibration_result = result
-        logger.info(
-            "Auto-calibration confidence %.2f [%s]\n  %s",
-            result.confidence,
-            result.stage,
-            "\n  ".join(result.report),
-        )
-        self.apply_calibration(result.calibration)
+        logger.info("Auto-calibration confidence %.2f [%s]\n  %s", result.confidence,
+                    result.stage, "\n  ".join(result.report))
+        if not result.calibration.hand_slots_px or result.confidence < 0.50:
+            logger.warning("Calibration anchors are incomplete; waiting for a clearer battle "
+                           "frame before deploying. If this persists, run "
+                           "`python scripts/calibrate_device.py --manual`.")
+            return False
 
+        self.apply_calibration(result.calibration)
+        self._calibrated_this_match = True
         out_path = self._calibration_file()
         save_calibration(out_path, result.calibration)
         preview_path = out_path.with_suffix(".preview.png")
@@ -333,14 +359,13 @@ class ClashRoyaleBotRunner:
 
         if not result.ok:
             logger.warning(
-                "Calibration confidence is low (%.2f). The bot will still play, but placements "
-                "may be a tile off. Check %s, or run:\n"
-                "  python scripts/calibrate_device.py --manual",
-                result.confidence,
+                "Calibration confidence is low (%.2f). Check %s or run "
+                "`python scripts/calibrate_device.py --manual`.", result.confidence,
                 preview_path if interactive_hint else "the preview image",
             )
         else:
             logger.info("Calibration saved to %s (preview: %s)", out_path, preview_path)
+        return True
 
     # -- deploy execution ------------------------------------------------------------
     def _start_deploy_worker(self) -> None:
@@ -715,12 +740,16 @@ class ClashRoyaleBotRunner:
                     state = self.process_single_frame(frame, rel_ts)
 
                 if state.phase.is_in_battle:
-                    self.ensure_calibration(frame)
+                    had_calibration = self._calibrated_this_match
+                    calibration_ready = self.ensure_calibration(frame)
 
                     if self.grid.width != frame.shape[1] or self.grid.height != frame.shape[0]:
                         self.grid.resize(frame.shape[1], frame.shape[0])
 
-                    if not self._busy:
+                    # This state was read *before* ensure_calibration rebuilt the vision stack.
+                    # Wait for a fresh frame after the rebuild; never deploy an old slot using
+                    # the newly measured tap coordinates. Also wait while anchors are missing.
+                    if calibration_ready and had_calibration and not self._busy:
                         with self.profiler.stage(BRAIN):
                             action = self.brain.decide(state)
                         if action is not None:

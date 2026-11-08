@@ -1,5 +1,9 @@
 # Labelled real screenshots
 
+`hand_still_report.json` and `paired_arena_default.json` / `paired_arena_experimental.json`
+are reproducible diagnostic reports, not live-match accuracy measurements. Methods, caveats
+and commands are in [SCREENSHOT_VERIFICATION.md](../docs/SCREENSHOT_VERIFICATION.md).
+
 This directory holds real match captures and human-readable labels. Labels can be incomplete or
 wrong, especially for occluded units; review the pixels before treating a score as ground truth.
 

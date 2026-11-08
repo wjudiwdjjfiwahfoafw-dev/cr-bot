@@ -16,9 +16,9 @@ stream that may be downscaled, and a perspective camera over the arena.
 This module measures the layout from a live battle frame using anchors that are genuinely
 stable in Clash Royale:
 
-* the **river** — a saturated cyan band, the single most reliable landmark on screen;
-* the **four magenta elixir-cost badges** on the hand cards — compact, high-contrast discs
-  laid out at a perfectly regular pitch, which pin down the card row exactly;
+* the **river** — a narrow, wide coloured band (cyan, magenta or lava-like);
+* three or four **magenta elixir-cost badges** on the hand cards — compact discs whose
+  spacing helps estimate the card row (obscured or grey badges can prevent a fit);
 * the **elixir bar** — the magenta pip strip directly below the card row;
 * the **Princess Towers** — thin red/blue health bars, used when they can be found.
 
@@ -30,8 +30,8 @@ coincide with the river actually detected.
 
 Detection quality varies with skin, HUD state and animation frames, so calibration degrades
 through an explicit ladder (4 towers -> 2 towers + river -> river + card row) and always
-reports a confidence. ``scripts/calibrate_device.py --manual`` remains the guaranteed path:
-click four towers once and the mapping is exact.
+reports a heuristic confidence. ``scripts/calibrate_device.py --manual`` lets you mark four
+points yourself; inspect the preview because neither path guarantees an exact mapping.
 """
 
 from __future__ import annotations
@@ -59,6 +59,10 @@ from cr_bot.arena.projection import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Bump when automatic anchor geometry changes incompatibly. Old manual calibrations are
+# never invalidated solely by this number.
+AUTO_CALIBRATION_REVISION = 1
 
 Point = Tuple[float, float]
 
@@ -190,6 +194,7 @@ class DeviceCalibrator:
             hand_card_size_px=hand_card_size,
             elixir_px=elixir_px,
             river_px_y=river_px,
+            auto_revision=AUTO_CALIBRATION_REVISION,
             source="manual" if self.manual_towers else "auto",
             residual_px=float(residual),
             notes=" | ".join(report),
@@ -238,25 +243,46 @@ class DeviceCalibrator:
         return left, top, right, bottom
 
     def detect_river(self, frame: np.ndarray) -> Optional[float]:
-        """Y coordinate of the river centre line (saturated cyan water band)."""
+        """Find a *narrow, wide* water/lava band, or abstain when none is visible.
+
+        Arena skins are not all cyan. On a real magenta-river map the old "largest cyan
+        run" was 150 px below the river because the entire cyan floor qualified as water.
+        Test cyan, magenta and bright lava, but reject broad coloured regions instead of
+        assuming the largest region is a river. This is an anchor, not proof of calibration;
+        unusual skins and overlays can still require manual calibration.
+        """
         h, w = frame.shape[:2]
+        if h < 40 or w < 40:
+            return None
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        water = cv2.inRange(hsv, np.array([86, 95, 95]), np.array([112, 255, 255]))
-
         lo, hi = int(h * 0.25), int(h * 0.72)
-        counts = water.sum(axis=1) / 255.0
-        band = counts[lo:hi]
-        if band.size == 0:
-            return None
-
-        thresh = max(w * 0.06, float(band.max()) * 0.35)
-        rows = [lo + i for i, c in enumerate(band) if c >= thresh]
-        if not rows:
-            return None
-        rows = self._largest_run(rows)
-        if len(rows) < 2:
-            return None
-        return float(sum(rows) / len(rows))
+        masks = (
+            ((86, 95, 95), (112, 255, 255)),   # blue water
+            ((138, 110, 115), (179, 255, 255)), # magenta river
+            ((5, 125, 130), (33, 255, 255)),   # bright lava
+        )
+        candidates: List[Tuple[float, float]] = []
+        for lower, upper in masks:
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            counts = (mask > 0).sum(axis=1).astype(np.float32) / float(w)
+            # Smooth tiny gaps without merging the river with an expanse of similarly
+            # coloured floor. A bridge may interrupt a row but not the whole band.
+            band = cv2.blur(counts[lo:hi].reshape(-1, 1), (1, 3)).ravel()
+            rows = np.flatnonzero(band >= 0.15)
+            if not rows.size:
+                continue
+            for run in np.split(rows, np.where(np.diff(rows) > 1)[0] + 1):
+                length = len(run)
+                if length < max(2, int(h * 0.003)) or length > h * 0.08:
+                    continue
+                strength = float(np.max(band[run]))
+                if strength < 0.25:
+                    continue
+                # Broad, strong horizontal coverage is much more river-like than a
+                # coloured unit, but favour a band rather than a single noisy row.
+                score = strength * (length / float(h)) ** 0.5
+                candidates.append((score, float(lo + run.mean())))
+        return max(candidates)[1] if candidates else None
 
     def detect_hand_row(self, frame: np.ndarray) -> Optional[dict]:
         """Locate the four hand cards via their magenta elixir-cost badges.
@@ -272,61 +298,79 @@ class DeviceCalibrator:
 
         n, _lab, stats, cents = cv2.connectedComponentsWithStats(magenta, 8)
         discs: List[Tuple[float, float, float]] = []
+        # Scale badge bounds with capture width instead of assuming 608 px frames.
+        min_badge = max(5.0, 14.0 * w / 608.0)
+        max_badge = max(min_badge + 1.0, 64.0 * w / 608.0)
         for i in range(1, n):
             x, y, bw, bh, area = stats[i]
             if y < h * 0.80:
                 continue
-            if not (14 <= bw <= 64 and 14 <= bh <= 64):
+            if not (min_badge <= bw <= max_badge and min_badge <= bh <= max_badge):
                 continue
             if not (0.6 <= bw / float(max(1, bh)) <= 1.7):
                 continue
             if area < 0.35 * bw * bh:
                 continue
             discs.append((float(cents[i][0]), float(cents[i][1]), float(max(bw, bh))))
-        if len(discs) < 4:
+        if len(discs) < 3:
             return None
 
+        # A transition or an unaffordable card can leave a grey/empty badge. Fit three
+        # *or* four badges to the regular hand pitch and infer the missing centre. The
+        # old loose four-disc fit sometimes treated the small "next card" badge as slot
+        # one and returned wildly uneven centres. Refuse poorly spaced candidates rather
+        # than writing bad tap coordinates into the persistent calibration.
         discs.sort(key=lambda d: d[0])
-        # Keep the four discs that form the most regular arithmetic progression. Outliers
-        # (the small "next card" badge on the far left, or a stray cost pip) are dropped by
-        # scoring every combination rather than only consecutive runs.
-        if len(discs) > 9:
-            discs = sorted(discs, key=lambda d: d[2], reverse=True)[:9]
+        if len(discs) > 12:
+            discs = sorted(discs, key=lambda d: d[2], reverse=True)[:12]
             discs.sort(key=lambda d: d[0])
-
-        best: Optional[List[Tuple[float, float, float]]] = None
-        best_cost = float("inf")
-        for quad in itertools.combinations(discs, 4):
-            xs = [d[0] for d in quad]
-            gaps = np.diff(xs)
-            if gaps.min() < w * 0.10:
+        best = None
+        for count in (4, 3):
+            if len(discs) < count:
                 continue
-            # A real hand row has near-identical gaps and near-identical badge sizes.
-            gap_cost = float(gaps.std() / max(1e-3, gaps.mean()))
-            size_cost = float(np.std([d[2] for d in quad]) / max(1.0, np.mean([d[2] for d in quad])))
-            ys = [d[1] for d in quad]
-            row_cost = float(np.std(ys) / max(1.0, h * 0.02))
-            cost = gap_cost + 0.6 * size_cost + 0.35 * row_cost
-            if cost < best_cost:
-                best_cost, best = cost, list(quad)
-        if best is None or best_cost > 0.55:
+            for group in itertools.combinations(discs, count):
+                for indices in itertools.combinations(range(4), count):
+                    xs = np.asarray([d[0] for d in group], dtype=np.float64)
+                    idx = np.asarray(indices, dtype=np.float64)
+                    pitch, start = np.polyfit(idx, xs, 1)
+                    if not (0.14 * w <= pitch <= 0.23 * w):
+                        continue
+                    if not (0.22 * w <= start <= 0.40 * w and
+                            0.78 * w <= start + 3 * pitch <= 0.99 * w):
+                        continue
+                    residual = float(np.max(np.abs(xs - (start + pitch * idx))))
+                    if residual > max(3.0, pitch * 0.055):
+                        continue
+                    ys = [d[1] for d in group]
+                    # One selected card rises. Reject unrelated rows but allow that lift.
+                    y_spread = float(max(ys) - min(ys))
+                    if y_spread > h * 0.055:
+                        continue
+                    sizes = [d[2] for d in group]
+                    size_cost = float(np.std(sizes)) / max(1.0, float(np.mean(sizes)))
+                    cost = residual / pitch + y_spread / h * 0.5 + size_cost * 0.1
+                    if best is None or cost < best[0]:
+                        best = (cost, group, float(start), float(pitch), count)
+            # Prefer a valid four-badge fit to any inferred three-badge fit.
+            if best is not None:
+                break
+        if best is None:
             return None
 
-        pitch = float(np.mean(np.diff([d[0] for d in best])))
+        _, group, start, pitch, count = best
         card_w = pitch * 0.94
         card_h = card_w / CARD_ASPECT
-        badge_cy = float(np.mean([d[1] for d in best]))
-        # The badge sits against the bottom edge of the card; its centre is a fixed
-        # fraction of a card height below the card's own centre.
+        badge_cy = float(np.median([d[1] for d in group]))
         card_cy = badge_cy - card_h * 0.47
         return {
-            "centers": [(d[0], card_cy) for d in best],
+            "centers": [(start + i * pitch, card_cy) for i in range(4)],
             "card_w": card_w,
             "card_h": card_h,
             "badge_cy": badge_cy,
             "pitch": pitch,
             "top": card_cy - card_h / 2.0,
             "bottom": card_cy + card_h / 2.0,
+            "observed_badges": count,
         }
 
     def detect_elixir_bar(

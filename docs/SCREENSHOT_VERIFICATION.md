@@ -13,10 +13,47 @@ python tools/recognition_benchmark.py --group additional --verbose
 python tools/sprite_smoke_benchmark.py --verbose
 python tools/vision_benchmark.py --frames 10 --quiet
 python tools/real_frame_check.py tests/fixtures/real_frames/real_solo_battle_empty.png
+python tools/hand_still_check.py --json samples/hand_still_report.json
+python tools/paired_arena_check.py --json samples/paired_arena_default.json
+python tools/paired_arena_check.py --experimental --json samples/paired_arena_experimental.json
 ```
 
 `recognition_benchmark.py --fail-on-errors` fails on any wrong card but **does not** require a
 correct one. Use `--min-correct 1` as well to demand positive coverage; it currently fails.
+
+## Hand stills and calibration
+
+`hand_still_check.py` evaluates six labelled screenshots with the actual auto-calibrator and
+configured-deck matcher. The current result is **23 correct, 0 wrong, 1 unknown / 24 slots**;
+the same stills before this change yielded 14/24, but that included an unsafe elimination-based
+Skeleton Barrel guess. The current matcher abstains on that Barrel. Four of the six frames come
+from one match; the six new portrait references come from a different dataset. One grey Cannon
+matches structurally and remains unready, while a grey Musketeer remains unknown. Tests also
+exercise one empty slot, raised cards, two off-deck configurations, three-badge hand calibration,
+resolution changes and synthetic coloured river bands. This is not a representative or live test.
+The detailed result is [`samples/hand_still_report.json`](../samples/hand_still_report.json).
+
+## Repeat-still arena pairs: recall, sides and extras together
+
+`paired_arena_check.py` uses a selected-card screenshot containing an emote as its warm-up, six
+identical frames, and then six repeats of each target still. It greedily matches predicted boxes
+to labelled boxes one-to-one using IoU >= 0.15; it does **not** score unit names. A box may overlap
+more than one labelled unit but receives at most one match. Sides are checked separately, and
+unmatched predictions are counted as extras relative to the annotations. Ground-truth sides were
+checked against visible markers; the original source annotations may be incomplete or wrong.
+
+| Setting | Labelled | Located | Correct side | Wrong side | Missed | Extras vs labels |
+|---|---:|---:|---:|---:|---:|---:|
+| Default | 8 | 1 | 1 | 0 | 7 | 8 |
+| Experimental overlay normalization | 8 | 6 | 5 | 1 | 2 | 19 |
+
+The no-unit warm-up/emote still had zero extras in these tests. This does **not** make the other
+results reliable: the default missed most labelled units after an overlay transition; the optional
+experimental path found more but produced many extras and a wrong side. It is off by default and
+can erase narrow objects as well as create phantoms. Sources and annotations are under
+[`tests/fixtures/paired_battle`](../tests/fixtures/paired_battle/README.md), with full boxes in the
+JSON reports. The screenshots are correlated, sparse stills from one video. Repeating each still is
+not continuous gameplay and cannot measure real motion, recall, false-positive rate or FPS.
 
 ## Real gameplay crops: naming remains an open problem
 

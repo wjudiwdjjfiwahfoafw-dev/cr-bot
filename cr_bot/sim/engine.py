@@ -1,5 +1,5 @@
 """
-Tick-accurate Level 11 Tournament Standard Clash Royale Arena & Combat Simulator.
+Approximate fixed-timestep Clash Royale arena and combat simulator.
 
 Models the 18x32 tile grid, bridges, river, 6 towers, King activation, 8-card FIFO cycle,
 Evolutions, 1x/2x/3x elixir + Sudden Death Overtime + Tiebreaker, deploy/cast delays,
@@ -278,8 +278,10 @@ class ClashRoyaleSimEngine:
         self.time: float = 0.0
         self._next_id: int = 10
 
-        self.ally = self._init_deck_state(Side.ALLY, ally_deck, ally_evos or ["mega_knight", "bats"])
-        self.enemy = self._init_deck_state(Side.ENEMY, enemy_deck, enemy_evos or [])
+        # None means the configured default; an explicit empty list means no evolutions.
+        self.ally = self._init_deck_state(
+            Side.ALLY, ally_deck, ["mega_knight", "skeleton_barrel"] if ally_evos is None else ally_evos)
+        self.enemy = self._init_deck_state(Side.ENEMY, enemy_deck, [] if enemy_evos is None else enemy_evos)
 
         self.towers: Dict[str, SimTower] = self._init_towers()
         self.entities: List[SimEntity] = []

@@ -25,7 +25,7 @@ class BotConfig:
             "goblin_gang",
         ]
     )
-    evolutions: List[str] = field(default_factory=lambda: ["mega_knight", "bats"])
+    evolutions: List[str] = field(default_factory=lambda: ["mega_knight", "skeleton_barrel"])
     adb_path: str = "adb"
     adb_serial: Optional[str] = None
     target_width: int = 720
@@ -42,6 +42,8 @@ class BotConfig:
     yolo_confidence: float = 0.42
     enable_opencv_fallback: bool = True
     enable_unit_recognition: bool = True
+    # Experimental photometric overlay compensation; may create or erase foreground.
+    experimental_overlay_normalization: bool = False
     tower_level: int = 11
 
     # --- real-device capture / input ------------------------------------------------
@@ -105,7 +107,7 @@ def load_config(path: str | Path) -> BotConfig:
 
     deck_raw = raw.get("deck", BotConfig().deck)
     deck = [normalize_card_name(str(c)) for c in deck_raw]
-    evos = [normalize_card_name(str(c)) for c in raw.get("evolutions", ["mega_knight", "bats"])]
+    evos = [normalize_card_name(str(c)) for c in raw.get("evolutions", ["mega_knight", "skeleton_barrel"])]
 
     adb_cfg = raw.get("adb", {})
     vision_cfg = raw.get("vision", {})
@@ -132,6 +134,8 @@ def load_config(path: str | Path) -> BotConfig:
         yolo_confidence=float(vision_cfg.get("yolo_confidence", 0.42)),
         enable_opencv_fallback=bool(vision_cfg.get("enable_opencv_fallback", True)),
         enable_unit_recognition=bool(vision_cfg.get("unit_recognition", True)),
+        experimental_overlay_normalization=bool(
+            vision_cfg.get("experimental_overlay_normalization", False)),
         tower_level=int(tactics_cfg.get("tower_level", 11)),
         capture_width=int(capture_cfg.get("width", 720)),
         capture_backend=str(capture_cfg.get("backend", "auto")),

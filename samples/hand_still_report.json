@@ -1,0 +1,215 @@
+{
+  "warning": "Six hand stills only; four are correlated frames from one match. Fixed templates were taken from independent screenshots. Not representative or a live test.",
+  "summary": {
+    "correct": 23,
+    "wrong": 0,
+    "unknown": 1,
+    "total": 24
+  },
+  "frames": [
+    {
+      "image": "samples/calibration_preview.png",
+      "calibration_stage": "auto-4-tower",
+      "slots": [
+        {
+          "expected": "skeleton_barrel",
+          "predicted": "unknown",
+          "confidence": 0.0,
+          "is_ready_at_elixir_10": false,
+          "outcome": "unknown"
+        },
+        {
+          "expected": "bats",
+          "predicted": "bats",
+          "confidence": 0.6,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "spear_goblins",
+          "predicted": "spear_goblins",
+          "confidence": 0.411,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "zap",
+          "predicted": "zap",
+          "confidence": 0.538,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        }
+      ]
+    },
+    {
+      "image": "tests/fixtures/real_frames/real_solo_battle_empty.png",
+      "calibration_stage": "anchor-rect",
+      "slots": [
+        {
+          "expected": "hog_rider",
+          "predicted": "hog_rider",
+          "confidence": 0.774,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "skeletons",
+          "predicted": "skeletons",
+          "confidence": 0.698,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "cannon",
+          "predicted": "cannon",
+          "confidence": 0.839,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "ice_spirit",
+          "predicted": "ice_spirit",
+          "confidence": 0.791,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        }
+      ]
+    },
+    {
+      "image": "tests/fixtures/paired_battle/0RqoBtTgewOXP37lNwMI.jpg",
+      "calibration_stage": "anchor-rect",
+      "slots": [
+        {
+          "expected": "fireball",
+          "predicted": "fireball",
+          "confidence": 0.663,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "skeletons",
+          "predicted": "skeletons",
+          "confidence": 0.78,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "ice_golem",
+          "predicted": "ice_golem",
+          "confidence": 0.747,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "hog_rider",
+          "predicted": "hog_rider",
+          "confidence": 0.697,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        }
+      ]
+    },
+    {
+      "image": "tests/fixtures/paired_battle/04FED5slLByee0jMFkCR.jpg",
+      "calibration_stage": "anchor-rect",
+      "slots": [
+        {
+          "expected": "ice_spirit",
+          "predicted": "ice_spirit",
+          "confidence": 0.728,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "skeletons",
+          "predicted": "skeletons",
+          "confidence": 0.772,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "cannon",
+          "predicted": "cannon",
+          "confidence": 0.8,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "musketeer",
+          "predicted": "musketeer",
+          "confidence": 0.641,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        }
+      ]
+    },
+    {
+      "image": "tests/fixtures/paired_battle/0J09bneS0qzybsMz6ypX.jpg",
+      "calibration_stage": "anchor-rect",
+      "slots": [
+        {
+          "expected": "ice_spirit",
+          "predicted": "ice_spirit",
+          "confidence": 0.728,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "skeletons",
+          "predicted": "skeletons",
+          "confidence": 0.768,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "cannon",
+          "predicted": "cannon",
+          "confidence": 0.799,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "musketeer",
+          "predicted": "musketeer",
+          "confidence": 0.612,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        }
+      ]
+    },
+    {
+      "image": "tests/fixtures/paired_battle/0JPlKsDPop5jfLGdqEya.jpg",
+      "calibration_stage": "anchor-rect",
+      "slots": [
+        {
+          "expected": "fireball",
+          "predicted": "fireball",
+          "confidence": 0.661,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "skeletons",
+          "predicted": "skeletons",
+          "confidence": 0.785,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "cannon",
+          "predicted": "cannon",
+          "confidence": 0.826,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        },
+        {
+          "expected": "musketeer",
+          "predicted": "musketeer",
+          "confidence": 0.658,
+          "is_ready_at_elixir_10": true,
+          "outcome": "correct"
+        }
+      ]
+    }
+  ]
+}

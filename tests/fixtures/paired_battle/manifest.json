@@ -1,0 +1,40 @@
+{
+  "description": "Diagnostic pairs made from sparse stills, not live video. All belong to one match; labels may be incomplete. Boxes are the source dataset's axis-aligned annotations, rounded to pixels; sides were checked against visible red/blue markers.",
+  "background": "20uaZJUUj9nNaRJp1Ku2.jpg",
+  "warm_frames": 6,
+  "target_frames": 6,
+  "minimum_iou": 0.15,
+  "cases": [
+    {
+      "name": "same_selected_frame_with_emote",
+      "image": "20uaZJUUj9nNaRJp1Ku2.jpg",
+      "labels": []
+    },
+    {
+      "name": "three_units_without_selection_overlay",
+      "image": "0JPlKsDPop5jfLGdqEya.jpg",
+      "labels": [
+        {"name": "musketeer", "side": "enemy", "bbox": [189, 104, 250, 180]},
+        {"name": "ice_golem", "side": "ally", "bbox": [423, 409, 512, 476]},
+        {"name": "hog_rider", "side": "ally", "bbox": [413, 429, 476, 517]}
+      ]
+    },
+    {
+      "name": "one_unit_with_selection_overlay",
+      "image": "12xkBm52RVK8zKqZyGRS.jpg",
+      "labels": [
+        {"name": "musketeer", "side": "enemy", "bbox": [125, 397, 179, 479]}
+      ]
+    },
+    {
+      "name": "enemy_musketeer_and_three_skeletons",
+      "image": "1EiRDae0M8B3GTXWGvFD.jpg",
+      "labels": [
+        {"name": "musketeer", "side": "enemy", "bbox": [143, 324, 192, 409]},
+        {"name": "skeleton", "side": "enemy", "bbox": [440, 451, 465, 482]},
+        {"name": "skeleton", "side": "enemy", "bbox": [466, 453, 493, 496]},
+        {"name": "skeleton", "side": "enemy", "bbox": [433, 471, 468, 513]}
+      ]
+    }
+  ]
+}
