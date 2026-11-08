@@ -55,7 +55,7 @@ capture:
 input:
   backend: "auto"          # auto -> swipe first, then the more literal adb fallbacks
   chain: ["swipe", "motionevent", "tap"]
-  deploy_style: "drag"     # drag | tap
+  deploy_style: "tap"      # tap = select card, then tap the tile (no drag)
   verify_threshold: 9.0    # Pixel-diff (0-255) that counts as "the card left the hand"
 
 # ---------------------------------------------------------------------------------------

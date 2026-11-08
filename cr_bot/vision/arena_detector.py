@@ -266,16 +266,27 @@ class ArenaUnitBackend:
         self.stats = DetectorStats()
         #: how many appearance samples have been learned from verified (own) deployments
         self.learned_samples: int = 0
+        #: consecutive frames in which only bars were found (see RESET_AFTER_STALE_FRAMES)
+        self._stale_frames: int = 0
 
     def reset(self) -> None:
         self.segmenter.reset()
         self.stats = DetectorStats()
+        self._stale_frames = 0
 
     # -- main entry ----------------------------------------------------------------
     #: a segmentation blob this uncertain, with no health bar to confirm it, is dropped
     MIN_CONFIDENCE = 0.30
     #: two detections of the same side this close together are one unit, not two
     DEDUPE_TILES = 0.75
+
+    #: consecutive frames in which only bars (never silhouettes) were found before the background
+    #: model is told to re-learn the arena
+    RESET_AFTER_STALE_FRAMES = 4
+
+    #: how much confidence a bars-only detection loses. It is the weakest evidence class: no
+    #: silhouette, no size measurement, no side vote — just "a bar-shaped capsule is here".
+    BARS_ONLY_CONFIDENCE = 0.45
 
     def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
         units: List[BlobUnit] = []
@@ -290,6 +301,39 @@ class ArenaUnitBackend:
 
         described = [u for u in units if self._keep(u)]
         out = [self._describe(unit, frame_bgr, grid) for unit in described]
+        # A troop that the background model has not learned yet — it is standing still, or it
+        # just walked into a part of the arena the model has not settled — still draws its bar.
+        # Adding those as low-confidence detections makes a unit appear immediately instead of
+        # seconds later, but they must always lose to a real silhouette, so anything segmentation
+        # found within a tile of them wins.
+        extras = self._detect_bars_only(frame_bgr, grid)
+        for extra in extras:
+            if any(
+                math.hypot(extra.tile_x - d.tile_x, extra.tile_y - d.tile_y) <= 1.0
+                and extra.side == d.side
+                for d in out
+            ):
+                continue
+            out.append(extra)
+
+        # Nothing from segmentation while a unit's bar *is* on the board means the background
+        # model has gone stale — typically because the arena changed under it (a tower fell, the
+        # camera shifted a pixel, a unit parked on scenery and was absorbed). Telling it to
+        # re-learn brings the silhouettes back within a few frames. The gate matters: an empty
+        # arena also produces no segmentation, and resetting on that would keep the model in
+        # warm-up forever and detect nothing at all.
+        if out and len(out) == len(extras):
+            self._stale_frames += 1
+            if self._stale_frames >= self.RESET_AFTER_STALE_FRAMES and self.enable_segmentation:
+                logger.info(
+                    "detector: %d frame(s) with bars but no silhouettes; re-learning the arena",
+                    self._stale_frames,
+                )
+                self.segmenter.background.reset()
+                self._stale_frames = 0
+        else:
+            self._stale_frames = 0
+
         out = self._dedupe(out, grid)
         self._remember(out, frame_bgr, grid)
         self.stats.add(described, bars=len(self.last_bars),
@@ -421,9 +465,12 @@ class ArenaUnitBackend:
                 self.learned_samples += 1
 
     # -- fallback while the background model warms up ------------------------------
-    #: a unit bar is at least this wide (tiles); anything thinner is tower decoration,
-    #: a level badge, or a piece of the UI
-    MIN_FALLBACK_BAR_TILES = 0.22
+    #: A fallback bar must be at least this wide (tiles). Measured on the real frame: every
+    #: troop's bar is >= 1.1 tiles even when white HP digits cut it in half, while the pieces of
+    #: UI text and decoration that also survive the shape filters are all under 0.5 tiles.
+    #: The fallback's job is to keep *substantial* units visible while segmentation warms up;
+    #: a 0.3-tile strip is not reliable evidence of anything, so it is not reported at all.
+    MIN_FALLBACK_BAR_TILES = 0.90
 
     def _detect_bars_only(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
         """Last-resort detection from health bars alone.
@@ -441,10 +488,25 @@ class ArenaUnitBackend:
         bars = self.bar_reader.read(frame_bgr, grid, ppt,
                                     min_width_tiles=self.MIN_FALLBACK_BAR_TILES)
         self.last_bars = bars
+
         out: List[RawDetection] = []
         foot_offset = self.BAR_TO_FOOT_TILES * ppt
+        # Where the arena actually ends. The bar reader searches the whole calibrated arena
+        # rectangle, which on a real phone extends over the card tray and the elixir bar; the
+        # *play field* is the part above the river-and-lane strip the game reserves for the HUD.
+        # Reading bars there reported the elixir pips and the hand's level badges as troops: on
+        # one real frame, four of seven "units" sat at y ~ 31 tiles, i.e. in the tray.
+        _ax1, _ay1, _ax2, field_bottom = self._field_bounds(frame_bgr, grid)
+        out_of_field = 0
         for bar in bars:
             x1, _y1, x2, y2 = bar.bbox
+            if y2 + foot_offset > field_bottom:
+                out_of_field += 1
+                continue
+            # Only a bar with the game's dark UI capsule around it is a unit's HP bar; a bare
+            # coloured strip is a tower ring or a piece of decoration.
+            if not getattr(bar, "has_outline", True):
+                continue
             cx = 0.5 * (x1 + x2)
             foot_y = y2 + foot_offset
             tx, ty = grid.pixel_to_tile(cx, foot_y)
@@ -452,6 +514,11 @@ class ArenaUnitBackend:
                 continue
             if self._near_tower(grid, tx, ty):
                 continue    # tower HP bar, not a troop
+            if not self._inside_playfield(grid, ty):
+                # Above the enemy king and below your own king there is no playfield: that is
+                # the enemy's castle wall and name plate at the top, and the wall plus the card
+                # tray at the bottom. Bars there belong to neither team's troops.
+                continue
             width_tiles = bar.total_width / ppt
             weight, label = classify_size(max(0.5, width_tiles * 1.6))
             out.append(
@@ -468,12 +535,62 @@ class ArenaUnitBackend:
                     source="bars",
                 )
             )
+        if out_of_field:
+            logger.debug("bars-only fallback: ignored %d bar(s) below the play field", out_of_field)
         return self._dedupe(out, grid)
 
-    @staticmethod
-    def _near_tower(grid: ArenaGrid, tile_x: float, tile_y: float, radius_tiles: float = 2.2) -> bool:
+    #: the fraction of the calibrated arena rectangle that is actually play field (the rest is
+    #: the card tray / elixir strip at the bottom and the enemy's name plate at the top)
+    FIELD_BOTTOM_FRACTION = 0.90
+    FIELD_TOP_FRACTION = 0.03
+
+    def _field_bounds(self, frame_bgr: np.ndarray, grid: ArenaGrid):
+        """Pixel rectangle of the *playable* field inside the calibrated arena area."""
+        ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
+        height = float(ay2 - ay1)
+        top = int(ay1 + self.FIELD_TOP_FRACTION * height)
+        bottom = int(ay1 + self.FIELD_BOTTOM_FRACTION * height)
+        h, w = frame_bgr.shape[:2]
+        return (max(0, ax1), max(0, top), min(w, ax2), min(h, bottom))
+
+    #: margin (tiles) inside the kings' rows that still counts as playfield
+    PLAYFIELD_MARGIN_TILES = 1.0
+
+    @classmethod
+    def _inside_playfield(cls, grid: ArenaGrid, tile_y: float) -> bool:
+        """Is this row of the arena actually playable? (the kings' rows bracket the playfield)"""
+        towers = getattr(grid, "TOWER_TILES", {})
+        enemy_king = towers.get("enemy_king")
+        ally_king = towers.get("ally_king")
+        if not towers:
+            return True
+        if enemy_king is not None and tile_y < enemy_king[1] - cls.PLAYFIELD_MARGIN_TILES:
+            return False
+        if ally_king is not None and tile_y > ally_king[1] - cls.PLAYFIELD_MARGIN_TILES:
+            return False
+        return True
+
+    #: a tower's own HP bar is drawn on its crown, just above and around the tower centre
+    TOWER_BAR_RADIUS_TILES = 1.2
+    #: ... and a troop fighting *next to* a tower is 1-2 tiles away, so the vertical test has to
+    #: be one-sided: only a bar at or above the crown can be the tower's own
+    TOWER_BAR_MAX_BELOW_TILES = 0.6
+
+    @classmethod
+    def _near_tower(cls, grid: ArenaGrid, tile_x: float, tile_y: float,
+                    radius_tiles: Optional[float] = None) -> bool:
+        """True when this *bar* belongs to a tower rather than to a troop.
+
+        The old test was a plain 2.2-tile circle, which is wider than the gap between a tower
+        and the troop attacking it — so an enemy Mega Knight fighting at the princess tower was
+        silently discarded as "the tower's bar". The radius is now the tower's own footprint and
+        the bar must be drawn at or above the crown, which is where the game puts it.
+        """
+        radius = cls.TOWER_BAR_RADIUS_TILES if radius_tiles is None else radius_tiles
         for tower_x, tower_y in grid.TOWER_TILES.values():
-            if math.hypot(tile_x - tower_x, tile_y - tower_y) <= radius_tiles:
+            if math.hypot(tile_x - tower_x, tile_y - tower_y) > radius:
+                continue
+            if tile_y <= tower_y + cls.TOWER_BAR_MAX_BELOW_TILES:
                 return True
         return False
 

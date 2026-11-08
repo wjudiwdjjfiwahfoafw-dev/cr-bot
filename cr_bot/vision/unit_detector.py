@@ -203,6 +203,10 @@ class ArenaBackgroundModel:
         #: how many frames a pixel needed to settle the first time (warm-up grace)
         self._settled: Optional[np.ndarray] = None
         self._shift_cooldown = 0
+        #: regions the caller has vouched for as "a unit is here" (see protect_from_absorb)
+        self._protected: Optional[np.ndarray] = None
+        #: uint8 view of the frame being processed, so update() need not re-cast it
+        self._frame_u8: Optional[np.ndarray] = None
         self._ppt = 1.0
         #: fraction of the arena that must change at once before it is called a scene shift
         self.SCENE_SHIFT_FRACTION = 0.30
@@ -220,7 +224,7 @@ class ArenaBackgroundModel:
 
     @property
     def is_ready(self) -> bool:
-        return self._background is not None and self._frames_seen >= self.warmup_frames
+        return self._background is not None and self._frames_seen - 1 >= self.warmup_frames
 
     @property
     def frames_seen(self) -> int:
@@ -238,6 +242,8 @@ class ArenaBackgroundModel:
         self._change_age = None
         self._settled = None
         self._background_u8 = None
+        self._protected = None
+        self._frame_u8 = None
         self._shift_cooldown = 0
 
     def _background_u8_view(self) -> np.ndarray:
@@ -254,6 +260,7 @@ class ArenaBackgroundModel:
     def _ensure(self, frame_bgr: np.ndarray) -> np.ndarray:
         frame_u8 = frame_bgr if frame_bgr.dtype == np.uint8 else np.clip(frame_bgr, 0, 255).astype(np.uint8)
         frame = frame_u8.astype(np.float32)
+        self._frame_u8 = frame_u8
         if self._background is None or self._background.shape != frame.shape:
             self._background = frame.copy()
             self._background_u8 = frame_u8.copy()
@@ -286,7 +293,7 @@ class ArenaBackgroundModel:
         of assuming background.
         """
         self._ensure(frame_bgr)
-        if self._frames_seen < self.warmup_frames or self._background is None:
+        if self._frames_seen - 1 < self.warmup_frames or self._background is None:
             return np.full(frame_bgr.shape[:2], BG_UNKNOWN, np.uint8)
 
         frame_u8 = frame_bgr if frame_bgr.dtype == np.uint8 else np.clip(frame_bgr, 0, 255).astype(np.uint8)
@@ -365,6 +372,10 @@ class ArenaBackgroundModel:
     def update(self, frame_bgr: np.ndarray, foreground_mask: Optional[np.ndarray] = None) -> None:
         """Fold the frame into the background where nothing was detected."""
         frame = self._ensure(frame_bgr)
+        # NB: _ensure() bumps _frames_seen when it (re)allocates the buffers, so the very first
+        # call already reports 2. Everything downstream must therefore compare against
+        # _frames_seen - 1, or the model never leaves its UNKNOWN state and the detector reports
+        # nothing at all: a silent, total false negative on the first frames of a match.
         if self._background is None:
             return
         if self._foreground_age is None:
@@ -374,7 +385,7 @@ class ArenaBackgroundModel:
         if self._settled is None:
             self._settled = np.zeros(frame.shape[:2], np.int32)
 
-        if self._frames_seen <= self.warmup_frames:
+        if self._frames_seen - 1 <= self.warmup_frames:
             # settle quickly during warm-up
             rate = 0.5
         else:
@@ -391,15 +402,28 @@ class ArenaBackgroundModel:
 
         free = ~occupied
         if free.any():
-            self._background[free] += rate * (frame[free] - self._background[free])
-            self._settled[free] += 1
-            self._foreground_age[free] = 0
-            self._change_age[free] = 0
+            # Blending only the free pixels must not be done with boolean fancy indexing: on a
+            # 480x695x3 float array, ``bg[free] += rate * (frame[free] - bg[free])`` builds
+            # three full-size temporaries and costs ~14 ms per frame, which was the single
+            # largest item in the whole vision pipeline. ``cv2.addWeighted`` is one SIMD pass
+            # over the whole image, and ``np.copyto(..., where=)`` writes back in another, with
+            # no fancy indexing at all.
+            blended = cv2.addWeighted(frame, rate, self._background, 1.0 - rate, 0.0)
+            np.copyto(self._background, blended, where=free[:, :, None])
+            if free.all():
+                self._settled += 1
+                self._foreground_age[:] = 0
+                self._change_age[:] = 0
+            else:
+                self._settled += free
+                self._foreground_age[free] = 0
+                self._change_age[free] = 0
 
         if occupied.any():
             self._foreground_age[occupied] += 1
             # how long has the *content* of this pixel been constant? (scenery vs a unit)
-            frame_u8 = np.clip(frame, 0, 255).astype(np.uint8)
+            frame_u8 = self._frame_u8 if self._frame_u8 is not None else np.clip(
+                frame, 0, 255).astype(np.uint8)
             if self._prev is not None and self._prev.shape == frame_u8.shape:
                 changed = self._difference(frame_u8, self._prev)
             else:
@@ -407,11 +431,20 @@ class ArenaBackgroundModel:
             self._change_age[occupied & (changed < 2.0)] += 1
             self._change_age[occupied & (changed >= 2.0)] = 0
 
-            if self.absorb_static_scenery:
+            # Cheap gate first: the absorb pass needs a connected-component labelling of the
+            # whole arena, which is the most expensive thing in the update and is only needed
+            # when *some* region has actually been still for a long time.
+            if self.absorb_static_scenery and bool((self._foreground_age >= self.ABSORB_AFTER_FRAMES).any()):
                 min_area = self.ABSORB_MIN_AREA_TILES2 * self._ppt * self._ppt
                 static = occupied & (self._foreground_age >= self.ABSORB_AFTER_FRAMES) & (
                     self._change_age >= self.ABSORB_AFTER_FRAMES
                 )
+                protected = self._protected
+                if protected is not None and protected.shape == static.shape and protected.any():
+                    # grow the protected footprint a little: a sprite moves inside its own box
+                    grown = cv2.dilate(protected.astype(np.uint8),
+                                       cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
+                    static &= ~grown
                 if static.any():
                     n, labels = cv2.connectedComponents(static.astype(np.uint8), connectivity=8)
                     if n > 1:
@@ -427,9 +460,29 @@ class ArenaBackgroundModel:
                             self._foreground_age[adopt] = 0
                             self._change_age[adopt] = 0
 
-        self._prev = np.clip(frame, 0, 255).astype(np.uint8)
+        self._prev = self._frame_u8
         self._background_u8 = None      # invalidate the uint8 mirror after an update
         self._frames_seen += 1
+        self._protected = None          # one frame only: evidence must be refreshed every frame
+
+    def protect_from_absorb(self, mask: np.ndarray) -> None:
+        """Mark regions that must never be adopted into the background.
+
+        The absorb path exists so the scenery *stops* shredding the frame: a destroyed tower's
+        rubble, a spell splat. Its test is "has not changed for ~60 frames", and a troop
+        standing still — a Giant parked at the bridge, a building, a defensive structure that
+        the bot itself placed — passes that test exactly. After roughly five seconds the troop
+        is folded into the arena floor and the detector reports **nothing there**, which is a
+        silent false negative that no threshold can recover from.
+
+        So the caller tells the model where it has positive evidence of a unit. Bars are that
+        evidence: the game draws one per unit, and it is not part of the arena. A protected
+        region keeps its foreground age, so it can stay a unit indefinitely.
+
+        The mask is expected in the model's own (down-scaled) coordinate space and is stored
+        for the next update only.
+        """
+        self._protected = None if mask is None else (mask > 0)
 
     def observe(self, frame_bgr: np.ndarray) -> np.ndarray:
         """Convenience: certain-foreground mask for this frame, then update the model.
@@ -501,6 +554,11 @@ class HealthBar:
     hp_ratio: float
     fill_width: int
     total_width: int
+    #: True when the strip has the game's dark UI capsule around it. A troop's bar does; a
+    #: tower's decorative ring (also "team coloured, thin and horizontal", but painted flat on
+    #: the building) and a bright patch of floor do not. Only outline-backed bars are used as
+    #: evidence for side, splitting and size — the others are still reported, but as hints.
+    has_outline: bool = True
 
     @property
     def center_px(self) -> Tuple[float, float]:
@@ -523,6 +581,14 @@ class HealthBarReader:
     MAX_WIDTH_TILES = 3.2
     #: minimum aspect ratio that separates a bar from a bright patch of floor
     MIN_ASPECT = 1.9
+    #: a real bar is a *filled capsule*: the team colour covers most of the bar's height in most
+    #: of its columns. Two things that look like bars by bounding box do not satisfy this, and
+    #: both were being read on a real device: the white HP digits printed *over* a tower's bar
+    #: (they cut the colour into fragments) and the row of round elixir pips (separate circles).
+    #: Their phantom bars then acted as Voronoi split points inside real troop blobs, which is
+    #: how one Mega Knight became three boxes.
+    SOLID_ROW_FRACTION = 0.75
+    SOLID_COLUMN_SHARE = 0.55
 
     def __init__(self, min_fill_ratio: float = 0.55) -> None:
         self.min_fill_ratio = min_fill_ratio
@@ -542,6 +608,10 @@ class HealthBarReader:
             return []
         roi = frame_bgr[ay1:ay2, ax1:ax2]
         masks = self._colour_masks(roi)
+        # brightness, computed *once* per frame: the outline test needs it for every candidate,
+        # and doing a full-frame HSV conversion per candidate cost 16 ms per frame on a real
+        # screenshot - a third of the whole vision budget spent on the same conversion.
+        value = self._value_channel(roi)
 
         h_min = max(2, int(round(self.MIN_HEIGHT_TILES * ppt)))
         h_max = max(h_min + 1, int(round(self.MAX_HEIGHT_TILES * ppt)))
@@ -578,6 +648,8 @@ class HealthBarReader:
                 filled = float(cv2.countNonZero(mask[by:by + bh, bx:bx + bw]))
                 if filled / float(max(1, bw * bh)) < self.min_fill_ratio:
                     continue
+                if not self._is_solid(mask, bx, by, bw, bh):
+                    continue
                 if not self._is_isolated(mask, bx, by, bw, bh):
                     continue
                 bar = self._with_tail(roi, mask, side, bx, by, bw, bh)
@@ -589,9 +661,69 @@ class HealthBarReader:
                             hp_ratio=bar[4],
                             fill_width=bw,
                             total_width=bar[2] - bar[0],
+                            has_outline=self._has_dark_outline(value, bx, by, bw, bh, ppt),
                         )
                     )
         return self._merge(bars)
+
+    #: share of the pixels just above/below a candidate bar that must be UI-dark
+    OUTLINE_DARK_SHARE = 0.55
+
+    @staticmethod
+    def _value_channel(roi_bgr: np.ndarray) -> np.ndarray:
+        """HSV's V channel without a colour conversion: V is max(B, G, R) per pixel."""
+        b, g, r = cv2.split(roi_bgr)
+        return cv2.max(cv2.max(b, g), r)
+
+    @classmethod
+    def _has_dark_outline(cls, value: np.ndarray, bx: int, by: int, bw: int, bh: int,
+                          ppt: float) -> bool:
+        """True when the strip sits in the dark capsule the game draws around a unit's HP bar.
+
+        This is a *material* test, not a colour one: the capsule is UI, so it is dark and it is
+        directly adjacent to the bar on at least one side. It separates a troop's bar from the
+        two impostors that survive every colour/shape filter —
+
+        * a Princess Tower's ornamental ring, which is team-coloured, thin, wide, solid, and
+          painted flat on the building (nothing dark around it),
+        * the boss/enemy name plate and other pure-white UI text.
+
+        Both were being read as bars on a real device, and each phantom bar is a Voronoi split
+        point: with one sitting on a Mega Knight, a single troop became three boxes.
+        """
+        height, width = value.shape[:2]
+        if height < 4 or width < 4:
+            return False
+        pad = max(1, int(round(0.06 * ppt)))
+        dark = value < 110
+
+        def share(rows: slice) -> float:
+            band = dark[rows, max(0, bx - pad):min(width, bx + bw + pad)]
+            if band.size == 0:
+                return 0.0
+            # per column, is *any* pixel in the band dark? (the capsule is 1-2 px thick)
+            return float(band.any(axis=0).mean())
+
+        # Scan outwards from the strip and also *inside* its first/last row: at this resolution
+        # the capsule's edge is one pixel thick and the colour mask often swallows it, so it
+        # ends up as the bar's own top or bottom row rather than the one above/below it.
+        rows = [
+            max(0, by - 2), max(0, by - 1), by, min(height - 1, by + bh - 1),
+            min(height - 1, by + bh), min(height - 1, by + bh + 1),
+        ]
+        best = 0.0
+        for row in rows:
+            best = max(best, share(slice(row, row + 1)))
+        return best >= cls.OUTLINE_DARK_SHARE
+
+    @classmethod
+    def _is_solid(cls, mask: np.ndarray, bx: int, by: int, bw: int, bh: int) -> bool:
+        """True when the candidate is a filled strip rather than text or a row of pips."""
+        block = mask[by:by + bh, bx:bx + bw]
+        if block.size == 0:
+            return False
+        columns = (block > 0).mean(axis=0)
+        return float((columns >= cls.SOLID_ROW_FRACTION).mean()) >= cls.SOLID_COLUMN_SHARE
 
     @staticmethod
     def _is_isolated(mask: np.ndarray, bx: int, by: int, bw: int, bh: int) -> bool:
@@ -973,6 +1105,71 @@ class TeamClassifier:
 # ---------------------------------------------------------------------------------------------
 # the detector
 # ---------------------------------------------------------------------------------------------
+class ArenaStructureSuppressor:
+    """Knows where the arena's *permanent* structures are, and refuses to call them troops.
+
+    The segmentation detector labels anything that differs from the learned floor. Towers, the
+    king's platform and the bridges do differ from the floor — and their HP bars make them look
+    even more like troops, because the bar reader is exactly what confirms a blob as a unit. On
+    a real device this is the single largest source of phantom boxes: a box on "a troop" that is
+    really the princess tower the bot already knows the position of.
+
+    Two independent tests, both in tile space so they survive any resolution:
+
+    * **position** — inside the footprint of a known structure, a blob is not a troop (a troop
+      genuinely standing in front of a tower still has most of its body outside the footprint,
+      so the test uses the *distance from the blob's centre* to the structure centre, not
+      overlap; see :data:`STRUCTURE_CLEARANCE_TILES`);
+    * **stillness** — a blob whose mask has barely changed for many frames while sitting on a
+      structure is structure. (Handled by the background model's own absorb path, which is why
+      this class only adds the geometric part.)
+
+    Nothing here is card-specific and nothing is hard-coded to a unit: the structure positions
+    come from the calibrated :class:`ArenaGrid`, so a board with fewer towers simply suppresses
+    fewer places.
+    """
+
+    #: a blob whose centre is within this many tiles of a structure centre belongs to it
+    STRUCTURE_CLEARANCE_TILES = 1.15
+
+    def __init__(self, clearance_tiles: float = STRUCTURE_CLEARANCE_TILES) -> None:
+        self.clearance_tiles = float(clearance_tiles)
+
+    def structure_points(self, grid: ArenaGrid) -> List[Tuple[float, float, str]]:
+        points: List[Tuple[float, float, str]] = []
+        for name, (tx, ty) in getattr(grid, "TOWER_TILES", {}).items():
+            points.append((float(tx), float(ty), name))
+        return points
+
+    def is_structure(self, tile_x: float, tile_y: float, grid: ArenaGrid,
+                     clearance: Optional[float] = None) -> Optional[str]:
+        """Name of the structure this tile belongs to, or ``None`` if it is open ground."""
+        radius = self.clearance_tiles if clearance is None else clearance
+        for sx, sy, name in self.structure_points(grid):
+            if math.hypot(tile_x - sx, tile_y - sy) <= radius:
+                return name
+        return None
+
+    def suppress(self, units: Sequence["BlobUnit"], grid: ArenaGrid) -> List["BlobUnit"]:
+        """Drop units that are really structures. Units *with* a health bar are kept.
+
+        A health bar is the game's own statement that this is a troop with HP, and towers draw
+        their bar at their feet rather than at blob centre; keeping barred units means a troop
+        garrisoned right next to a tower is never silently deleted.
+        """
+        kept: List["BlobUnit"] = []
+        for unit in units:
+            structure = self.is_structure(unit.tile_x, unit.tile_y, grid)
+            if structure is None or getattr(unit, "has_bar", False):
+                kept.append(unit)
+            else:
+                logger.debug(
+                    "dropping phantom %s unit at (%.1f, %.1f): it is %s",
+                    unit.source, unit.tile_x, unit.tile_y, structure,
+                )
+        return kept
+
+
 class BlobUnitDetector:
     """Segment troops out of the arena and describe them in tile coordinates.
 
@@ -1007,6 +1204,8 @@ class BlobUnitDetector:
             diff_threshold=diff_threshold)
         self.bars = bar_reader if bar_reader is not None else HealthBarReader()
         self.team = team if team is not None else TeamClassifier()
+        #: towers/bridges differ from the learned floor too, but they are not troops
+        self.structures = ArenaStructureSuppressor()
         self.last_bars: List[HealthBar] = []
         self.last_dropped: int = 0
         self._ppt_cache: Dict[Tuple[int, int, int], float] = {}
@@ -1085,11 +1284,89 @@ class BlobUnitDetector:
             # a blob that is only moving cannot be seen by the background model yet (it is
             # indistinguishable from arena until it moves), so it is added on top
             units = self._add_motion_units(units, motion, roi, small, grid, ppt, (ax1, ay1), scale)
+            units = self.structures.suppress(units, grid)
+            units = self._dedupe(units)
         if observe:
             # only learn where we are *certain* it is background; UNKNOWN must not be adopted
             guard = np.where(state == BG_BACKGROUND, 0, 255).astype(np.uint8) if ready else None
+            if ready and self.last_bars:
+                # a health bar is proof of a unit: never let that patch become "arena floor"
+                self.background.protect_from_absorb(
+                    self._bar_protection(self.last_bars, small.shape, (ax1, ay1), scale, ppt)
+                )
             self.background.update(small, guard)
         return units
+
+    #: two detections closer than this (feet, in tiles) are the same troop seen twice; scaled
+    #: by the larger of the two units' widths, because half a sprite's width is still inside
+    #: its own footprint and a small unit's wing is still part of *that* unit
+    SAME_UNIT_TILES = 0.75
+    #: ... and never larger than this, or a real pair of troops would be collapsed
+    SAME_UNIT_MAX_TILES = 1.4
+
+    @classmethod
+    def _dedupe(cls, units: Sequence["BlobUnit"]) -> List["BlobUnit"]:
+        """Collapse detections that sit on top of each other.
+
+        Fragmenting one sprite into several boxes is the most damaging vision error the brain
+        can be given: it doubles the perceived threat in a lane, so the bot over-defends there
+        and leaves the other lane open. The splitter and the merger deal with the systematic
+        cases (a swarm under one blob, a body plus a detached weapon), but a real frame still
+        produces the odd pair of boxes whose feet are a few pixels apart — usually one bar-less
+        fragment plus the bar-backed unit next to it.
+
+        A troop's footprint is about one tile, so two units whose feet are within
+        ``SAME_UNIT_TILES`` of each other cannot both be real: keep the better-evidenced one
+        (a real health-bar outline first, then confidence, then area).
+        """
+        if len(units) < 2:
+            return list(units)
+
+        def rank(u: "BlobUnit") -> Tuple[int, int, float, float]:
+            bars = list(getattr(u, "bars", []) or [])
+            outline = 1 if any(getattr(b, "has_outline", True) for b in bars) else 0
+            return (outline, 1 if getattr(u, "has_bar", False) else 0,
+                    float(u.confidence), float(u.area_px))
+
+        ordered = sorted(units, key=rank, reverse=True)
+        kept: List["BlobUnit"] = []
+        for unit in ordered:
+            duplicate = False
+            for other in kept:
+                # The radius follows the *sprite's* size: half its width is still inside its own
+                # footprint, so two boxes that close cannot be two troops. A fixed radius either
+                # merges the members of a real swarm (they are ~0.5 tiles apart) or leaves a
+                # small unit's wing as a second troop of its own.
+                width = max(float(unit.width_tiles), float(other.width_tiles))
+                radius = min(cls.SAME_UNIT_MAX_TILES, max(cls.SAME_UNIT_TILES, 1.1 * width))
+                if math.hypot(unit.tile_x - other.tile_x, unit.tile_y - other.tile_y) < radius:
+                    duplicate = True
+                    break
+            if duplicate:
+                continue
+            kept.append(unit)
+        return kept
+
+    @staticmethod
+    def _bar_protection(
+        bars: Sequence[HealthBar],
+        shape: Tuple[int, int],
+        origin: Tuple[int, int],
+        scale: float,
+        ppt: float,
+    ) -> np.ndarray:
+        """Mask (model space) covering every unit bar plus the sprite below it."""
+        mask = np.zeros(shape, np.uint8)
+        ax1, ay1 = origin
+        body = int(round(1.6 * ppt * scale))
+        for bar in bars:
+            x1, y1, x2, y2 = bar.bbox
+            sx1 = int((x1 - ax1) * scale) - 2
+            sx2 = int((x2 - ax1) * scale) + 2
+            sy1 = int((y1 - ay1) * scale) - 2
+            sy2 = int((y2 - ay1) * scale) + body
+            cv2.rectangle(mask, (sx1, sy1), (sx2, sy2), 255, -1)
+        return mask
 
     # -- motion-only units -------------------------------------------------------
     #: a moving blob smaller than this (tiles) is a stray effect, not a troop
@@ -1407,9 +1684,15 @@ class BlobUnitDetector:
             for i in range(len(entries)):
                 for j in range(i + 1, len(entries)):
                     a, b = entries[i], entries[j]
-                    # never merge across bars: a bar means a real, separate unit
+                    # Never merge across bars: a bar means a real, separate unit. The exception
+                    # is a "bar" without the game's dark UI capsule around it: that is not
+                    # evidence of a unit (it is a tower's ornamental ring, UI text, a bright
+                    # patch of floor), so it must be allowed to fold into the sprite it is
+                    # painted on - otherwise a single Mega Knight stays three boxes.
                     if a[2] is not None and b[2] is not None:
-                        continue
+                        if (getattr(a[2], "has_outline", True)
+                                and getattr(b[2], "has_outline", True)):
+                            continue
                     if a[2] is not None or b[2] is not None:
                         # only merge a bar-less fragment *into* the anchored unit, inside it
                         if not self._near(a[0], b[0], radius * 0.6):
@@ -1423,10 +1706,18 @@ class BlobUnitDetector:
                         min(a[0][0], b[0][0]), min(a[0][1], b[0][1]),
                         max(a[0][2], b[0][2]), max(a[0][3], b[0][3]),
                     )
-                    # sanity: a merged unit is never wider than ~2.5 tiles or taller than 5
-                    if (box[2] - box[0]) > 2.6 * s_ppt or (box[3] - box[1]) > 5.2 * s_ppt:
+                    # sanity: a merged unit is never absurdly large. The limit depends on the
+                    # *evidence* for the merge: a bar-anchored merge is a real unit that the
+                    # arena split into pieces (a Mega Knight's body plus its detached shoulder
+                    # pad spans nearly two tiles of extra width), while a bar-less merge is two
+                    # fragments guessed to be one sprite and must stay small.
+                    anchored = a[2] is not None or b[2] is not None
+                    max_w = (5.0 if anchored else 2.6) * s_ppt
+                    max_h = (6.0 if anchored else 5.2) * s_ppt
+                    if (box[2] - box[0]) > max_w or (box[3] - box[1]) > max_h:
                         continue
-                    keep = a if a[2] is not None else b
+                    # prefer the piece backed by a *real* bar as the surviving unit
+                    keep = a if (a[2] is not None and getattr(a[2], "has_outline", True)) else b
                     other = b if keep is a else a
                     merged_box = keep[0] if keep[2] is not None else box
                     if keep[2] is not None:
@@ -1553,6 +1844,16 @@ class BlobUnitDetector:
                 weight, label = bar_weight, bar_label
         return weight, label, h_tiles, w_tiles
 
+    #: a bar further above the blob than this belongs to a different unit
+    BAR_MAX_GAP_TILES = 0.85
+
+    @staticmethod
+    def _bar_inside(x1: int, y1: int, x2: int, y2: int, bar: "HealthBar") -> bool:
+        """True when the bar sits *inside* the blob's box (tall units, raised arms, overlays)."""
+        bx1, by1, bx2, by2 = bar.bbox
+        cx = 0.5 * (bx1 + bx2)
+        return y1 <= by1 and by2 <= y2 and x1 <= cx <= x2
+
     @staticmethod
     def _bar_for(x1: int, y1: int, x2: int, y2: int, bars: Sequence[HealthBar],
                  ppt: float) -> Optional[HealthBar]:
@@ -1571,14 +1872,30 @@ class BlobUnitDetector:
             dy = y1 - by2
             if dy < -1.7 * ppt or dy > 1.35 * ppt:
                 continue
+            # A bar more than half a tile above the blob's top is a *different* unit's bar
+            # (a troop standing directly behind this one), and taking it would put this blob
+            # on the wrong side and in the wrong size class. 0.85 ppt keeps tall units whose
+            # bar floats over their raised weapon, and rejects the accidental neighbour.
+            if dy > self.BAR_MAX_GAP_TILES * ppt and not self._bar_inside(x1, y1, x2, y2, bar):
+                continue
             # a unit's bar spans roughly its own width; anything much narrower is arena clutter
             width_ratio = bar.total_width / blob_w
             if not (0.20 <= width_ratio <= 1.8):
                 continue
+            # Scoring, in tile units. The three terms have to be balanced because a blob's box
+            # is not centred on its own bar (a merge extends it), so a plain centre distance
+            # hands a troop the *fragment* of a tower's HP bar that happens to be nearer.
+            #   * a capsule-backed bar is real evidence, a bare coloured strip is a hint;
+            #   * a wider bar is a complete bar: UI text clipping a bar leaves narrow pieces;
+            #   * position still matters, but it is the weakest of the three.
+            outlined = 5.0 if getattr(bar, "has_outline", True) else 0.0
+            width_score = 2.0 * min(3.0, bar.total_width / ppt)
             score = (
-                -abs(bar_cx - cx)
-                - abs(dy - 0.5 * ppt)
-                - 20.0 * abs(math.log(max(1e-3, width_ratio)))
+                outlined
+                + width_score
+                - 0.35 * abs(bar_cx - cx) / ppt
+                - 0.35 * abs(dy - 0.5 * ppt) / ppt
+                - 8.0 * abs(math.log(max(1e-3, width_ratio)))
             )
             if score > best_score:
                 best_score = score

@@ -299,17 +299,41 @@ def test_identity_is_tint_tolerant_enough_to_match_enemy_to_ally_samples(tmp_pat
 # the backend that the bot actually runs
 # ======================================================================================
 
+def _draw_unit_bar(frame, cx, cy, width_tiles, ppt, colour=(40, 40, 235)):
+    """A health bar *as the game draws it*: bright fill inside a dark UI capsule."""
+    half = int(0.5 * width_tiles * ppt)
+    bar_h = max(3, int(0.09 * ppt))
+    cv2.rectangle(frame, (cx - half, cy - 2), (cx + half, cy + bar_h + 2), (32, 32, 36), -1)
+    cv2.rectangle(frame, (cx - half + 1, cy), (cx + half - 1, cy + bar_h), colour, -1)
+    return frame
+
+
 def test_unit_backend_falls_back_to_bars_while_the_background_warms_up() -> None:
     grid = ArenaGrid(720, 1280, _flat_calibration())
     backend = ArenaUnitBackend()
     frame = _arena_background(720, 1280)
     ppt = pixels_per_tile(grid)
-    cx, cy = 360, 500
-    cv2.rectangle(frame, (cx, cy), (cx + int(0.9 * ppt), cy + max(3, int(0.09 * ppt))),
-                  (40, 40, 235), -1)
+    _draw_unit_bar(frame, 360, 500, 1.1, ppt)
     detections = backend.detect(frame, grid)
     assert detections, "bars must be used before the background model is ready"
     assert all(d.source in ("bars", "segmentation", "segmentation+identity") for d in detections)
+
+
+def test_a_bare_coloured_strip_is_not_a_unit_bar() -> None:
+    """Without the game's dark capsule a strip is decoration, not evidence of a troop.
+
+    This is the guarantee that removed the phantom boxes on a real device: a tower's ornamental
+    ring and the white HP digits over a tower's bar both look like bars by colour and shape, and
+    both used to become "troops".
+    """
+    grid = ArenaGrid(720, 1280, _flat_calibration())
+    backend = ArenaUnitBackend()
+    frame = _arena_background(720, 1280)
+    ppt = pixels_per_tile(grid)
+    half = int(0.55 * ppt)
+    bar_h = max(3, int(0.09 * ppt))
+    cv2.rectangle(frame, (360 - half, 500), (360 + half, 500 + bar_h), (40, 40, 235), -1)
+    assert backend.detect(frame, grid) == []
 
 
 def test_unit_backend_names_a_troop_once_it_has_learned_it(tmp_path) -> None:

@@ -98,7 +98,9 @@ def test_opencv_healthbar_detector_and_velocity_tracking() -> None:
     # Frame 1: Enemy medium unit at tile (3.5, 17.5) -> draw bright red health bar 26px above foot
     f1 = _make_blank_battle_frame(grid, elixir_pips=6)
     px1, py1 = grid.tile_to_pixel(3.5, 17.5)
-    cv2.rectangle(f1, (px1 - 18, py1 - 28), (px1 + 18, py1 - 23), (20, 20, 245), -1)
+    # a bar as the game draws it: bright fill inside a dark capsule
+    cv2.rectangle(f1, (px1 - 20, py1 - 31), (px1 + 20, py1 - 21), (32, 32, 36), -1)
+    cv2.rectangle(f1, (px1 - 18, py1 - 29), (px1 + 18, py1 - 23), (20, 20, 245), -1)
     units_t1 = detector.detect_and_track(f1, now_ts=1.0)
     assert len(units_t1) == 1
     assert units_t1[0].side == Side.ENEMY
@@ -108,7 +110,8 @@ def test_opencv_healthbar_detector_and_velocity_tracking() -> None:
     # Frame 2 (0.5s later): Same unit moved down to (3.5, 19.0)
     f2 = _make_blank_battle_frame(grid, elixir_pips=6)
     px2, py2 = grid.tile_to_pixel(3.5, 19.0)
-    cv2.rectangle(f2, (px2 - 18, py2 - 28), (px2 + 18, py2 - 23), (20, 20, 245), -1)
+    cv2.rectangle(f2, (px2 - 20, py2 - 31), (px2 + 20, py2 - 21), (32, 32, 36), -1)
+    cv2.rectangle(f2, (px2 - 18, py2 - 29), (px2 + 18, py2 - 23), (20, 20, 245), -1)
     units_t2 = detector.detect_and_track(f2, now_ts=1.5)
     assert len(units_t2) == 1
     assert units_t2[0].track_id == units_t1[0].track_id

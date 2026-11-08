@@ -397,6 +397,14 @@ class ScrcpySession:
             attempts.append(("lower bitrate + no fps cap",
                              {"video_bit_rate": min(self.bitrate, 4_000_000), "max_fps": 0}))
             attempts.append(("H.265", {"video_codec": "h265", "video_bit_rate": min(self.bitrate, 6_000_000)}))
+            # A clean socket id, last. On Android 14+ a scrcpy server left over from *anything*
+            # (a crash, another tool, a previous run of this bot) keeps listening on
+            # ``localabstract:scrcpy``. The new server then fails to create its socket, and the
+            # symptom is precisely the one seen on the SM-A528B: the server logs its device line
+            # and then nothing, and no frame ever arrives. A distinct ``scid`` moves the server
+            # to its own abstract socket name, which sidesteps a stale or half-dead predecessor
+            # that ``adb shell`` housekeeping cannot see.
+            attempts.append(("fresh socket id", {"scid": "2b3a7f"}))
         else:
             attempts.append(("no fps cap", {"max_fps": 0}))
             attempts.append(("lower bitrate", {"bit_rate": min(self.bitrate, 4_000_000)}))
@@ -457,6 +465,12 @@ class ScrcpySession:
         ]
         return " | ".join(interesting[:4])
 
+    #: handshake budget for the retries, in seconds. The first attempt uses ``connect_timeout``
+    #: because a healthy server answers in well under a second; later attempts get more room,
+    #: because a cold hardware encoder that has just been torn down really can take a while to
+    #: emit its first frame, and giving up on it was throwing away a working configuration.
+    RETRY_HANDSHAKE_TIMEOUT = 25.0
+
     def _attempt_stream(self, overrides: Dict[str, str], label: str) -> None:
         """One full launch + handshake + first-frame cycle."""
         self._server_log.clear()
@@ -473,10 +487,13 @@ class ScrcpySession:
         )
         self._thread.start()
 
-        if not self._ready.wait(self.connect_timeout):
+        timeout = self.connect_timeout if label == "default" else max(
+            self.connect_timeout, self.RETRY_HANDSHAKE_TIMEOUT
+        )
+        if not self._ready.wait(timeout):
             raise ADBError(
                 "scrcpy server started but no video frame arrived within "
-                f"{self.connect_timeout:.0f}s.\n" + self.failure_report()
+                f"{timeout:.0f}s.\n" + self.failure_report()
             )
         if self._start_error is not None:
             raise ADBError(str(self._start_error))

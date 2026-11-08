@@ -40,6 +40,7 @@ from cr_bot.brain.mk_zap_bait_brain import MKZapBaitBrain
 from cr_bot.brain.spell_targeting import aim_is_wasted, is_damage_spell, plan_cast
 from cr_bot.config.loader import BotConfig
 from cr_bot.models import BattleState, BotAction, GamePhase
+from cr_bot.perf import BRAIN, CAPTURE, HUD, SLEEP, VISION, FrameProfiler
 from cr_bot.ui.click_to_tap import ClickToTapController, ManualGesture, map_click_to_frame
 from cr_bot.ui.debug_hud import TacticalDebugHUD
 from cr_bot.ui_window import PreviewWindow
@@ -47,6 +48,7 @@ from cr_bot.vision.arena_detector import HybridArenaDetector
 from cr_bot.vision.deploy_verifier import DeployVerifier, SlotSnapshot
 from cr_bot.vision.elixir_tracker import ElixirReader, OpponentTracker
 from cr_bot.vision.game_state import GameStateDetector
+from cr_bot.vision.gamescreen import LobbyNavigator, PhaseStabilizer, absolute
 from cr_bot.vision.hand_detector import HandCardDetector
 from cr_bot.vision.unit_identity import UnitIdentityMemory
 
@@ -133,6 +135,9 @@ class ClashRoyaleBotRunner:
 
         self._frames_seen = 0
         self._loop_times: List[float] = []
+        #: per-stage frame timing; the first thing to read when the loop feels slow
+        self.profiler = FrameProfiler(enabled=True)
+        self._last_perf_log_ts = -999.0
 
         # Interactive viewer: a click in the preview window is a real touch on the phone.
         self.manual_input = bool(manual_input) and not dry_run
@@ -144,6 +149,12 @@ class ClashRoyaleBotRunner:
     def _build_vision_stack(self, grid: ArenaGrid) -> None:
         cfg = self.cfg
         self.phase_detector = GameStateDetector(grid, tower_level=cfg.tower_level)
+        #: one odd frame must not end a match (see cr_bot/vision/gamescreen.py)
+        self.phase_stabilizer = PhaseStabilizer(
+            battle_exit_seconds=float(getattr(cfg, "battle_exit_confirm_s", 1.0))
+        )
+        #: --auto-queue walks a ladder of lobby taps instead of tapping Battle and hoping
+        self.lobby = LobbyNavigator()
         self.elixir_reader = ElixirReader(grid.cal, grid=grid)
         self.opp_tracker = OpponentTracker(bait_window_seconds=cfg.bait_window_seconds)
         self.hand_detector = HandCardDetector(
@@ -192,14 +203,15 @@ class ClashRoyaleBotRunner:
         if (w, h) != (self.grid.width, self.grid.height):
             self.grid.resize(w, h)
 
-        phase = self.phase_detector.detect_phase(frame_bgr, now_ts)
+        raw_phase = self.phase_detector.detect_phase(frame_bgr, now_ts)
+        phase = self.phase_stabilizer.update(raw_phase, now_ts)
 
         if phase.is_in_battle and not self._was_in_battle:
             logger.info("=== Match started: resetting trackers ===")
             self.reset_match_state(now_ts)
             self._was_in_battle = True
         elif not phase.is_in_battle and self._was_in_battle:
-            logger.info("=== Match ended (%s) ===", phase.value)
+            logger.info("=== Match ended (%s) ===", raw_phase.value)
             self._was_in_battle = False
             self.matches_played += 1
             self._calibrated_this_match = False
@@ -485,7 +497,8 @@ class ClashRoyaleBotRunner:
         self._click_binding_frame = key
 
         def _on_mouse(event: int, x: int, y: int, flags: int, param) -> None:
-            if event not in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_RBUTTONDOWN):
+            if event not in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_LBUTTONDBLCLK,
+                             cv2.EVENT_RBUTTONDOWN):
                 return
             rect = preview.image_rect()
             canvas_point = map_click_to_frame(
@@ -550,15 +563,19 @@ class ClashRoyaleBotRunner:
 
                 t0 = time.monotonic()
                 rel_ts = t0 - start_wall
+                self.profiler.begin_frame()
 
-                frame = self.adb.capture_frame(timeout=1.0)
+                with self.profiler.stage(CAPTURE):
+                    frame = self.adb.capture_frame(timeout=1.0)
                 if frame is None:
                     logger.warning("No frame from capture; retrying...")
                     time.sleep(0.05)
+                    self.profiler.end_frame()
                     continue
                 self._frames_seen += 1
 
-                state = self.process_single_frame(frame, rel_ts)
+                with self.profiler.stage(VISION):
+                    state = self.process_single_frame(frame, rel_ts)
 
                 if state.phase.is_in_battle:
                     self.ensure_calibration(frame)
@@ -567,7 +584,8 @@ class ClashRoyaleBotRunner:
                         self.grid.resize(frame.shape[1], frame.shape[0])
 
                     if not self._busy:
-                        action = self.brain.decide(state)
+                        with self.profiler.stage(BRAIN):
+                            action = self.brain.decide(state)
                         if action is not None:
                             self._log_action(state, action, rel_ts)
                             if self.submit_action(action, state):
@@ -581,6 +599,7 @@ class ClashRoyaleBotRunner:
                 fps_ema = 0.85 * fps_ema + 0.15 * (1.0 / dt_proc)
 
                 if self.show_hud:
+                    hud_started = time.perf_counter()
                     hud_img = self.hud.render(frame, state, self.brain.last_top_candidates, fps=fps_ema)
                     if self._preview is None:
                         self._preview = PreviewWindow(HUD_WINDOW_TITLE)
@@ -596,10 +615,16 @@ class ClashRoyaleBotRunner:
                         break
                     if key == 27 and self.clicker is not None:  # Esc
                         self.clicker.cancel()
+                    # HUD cost spans render + imshow + waitKey (which pumps the GUI event queue,
+                    # and therefore the mouse callback), so it is timed as one block.
+                    self.profiler.add(HUD, time.perf_counter() - hud_started)
 
                 sleep_rem = target_period - (time.monotonic() - t0)
                 if sleep_rem > 0:
-                    time.sleep(sleep_rem)
+                    with self.profiler.stage(SLEEP):
+                        time.sleep(sleep_rem)
+                self.profiler.end_frame()
+                self._log_performance(rel_ts)
 
         except KeyboardInterrupt:
             logger.info("Stopped by user.")
@@ -620,6 +645,32 @@ class ClashRoyaleBotRunner:
             )
             self.adb.close()
 
+    #: how often the frame-cost breakdown is logged (seconds)
+    PERF_LOG_INTERVAL_S = 30.0
+
+    def _log_performance(self, rel_ts: float) -> None:
+        """Log where the frame time went, once every ``PERF_LOG_INTERVAL_S``.
+
+        Without this, "the fps is low" is unanswerable: capture, vision, the HUD and the configured
+        loop rate all look the same from the outside. The line names the bottleneck explicitly so
+        the next optimisation is a measurement rather than a guess.
+        """
+        if rel_ts - self._last_perf_log_ts < self.PERF_LOG_INTERVAL_S:
+            return
+        if self.profiler.frames < 10:
+            return
+        self._last_perf_log_ts = rel_ts
+        summary = self.profiler.summary()
+        if not summary:
+            return
+        worst = summary[0]
+        logger.info("Frame cost: %s", self.profiler.report())
+        logger.info(
+            "  bottleneck: %s (%.1f ms mean, %.1f ms p95, %.0f%% of the frame) — "
+            "loop target is %.0f Hz",
+            worst[0], worst[1], worst[2], worst[3] * 100.0, self.cfg.loop_hz,
+        )
+
     def _log_action(self, state: BattleState, action: BotAction, rel_ts: float) -> None:
         logger.info(
             "[%.1fs | E %.1f vs %.1f] %s (slot %d) -> tile(%.1f, %.1f) pixel%s | score %.0f | %s",
@@ -636,6 +687,17 @@ class ClashRoyaleBotRunner:
         )
 
     def _handle_non_battle_screen(self, phase: GamePhase, now_ts: float) -> None:
+        """Drive the game back into a match when ``--auto-queue`` is on.
+
+        Two stages, because the lobby is not a single button:
+
+        1. ``MATCH_OVER`` — dismiss the result screen (OK / Return home).
+        2. anything else outside a battle — walk :class:`LobbyNavigator`'s ladder one tap at a
+           time (Battle → mode tile → Play). The old version tapped Battle and gave up, which
+           stalled on the mode-selection screen that sits between the two.
+
+        Every tap is rate limited, and the ladder is only reset when a match actually starts.
+        """
         if not self.cfg.auto_queue_battle:
             return
         if (now_ts - self._last_menu_click_ts) < 3.0:
@@ -646,8 +708,23 @@ class ClashRoyaleBotRunner:
             logger.info("Match over -> OK (%d, %d)", ox, oy)
             self.adb.tap(ox, oy)
             self._last_menu_click_ts = now_ts
-        elif phase == GamePhase.MAIN_MENU:
-            bx, by = self.phase_detector.menu_battle_button_xy(self.grid.width, self.grid.height)
-            logger.info("Main menu -> Battle (%d, %d)", bx, by)
-            self.adb.tap(bx, by)
-            self._last_menu_click_ts = now_ts
+            self.lobby.reset()
+            return
+
+        if phase.is_in_battle:
+            self.lobby.reset()
+            return
+
+        # UNKNOWN counts too: it is the normal reading between two lobby screens, and refusing to
+        # act on it is what made the queue wait for something else to happen.
+        tap = self.lobby.next_tap(now_ts)
+        if tap is None:
+            if self.lobby.finished:
+                logger.debug("auto-queue: ladder exhausted, waiting for the lobby to settle")
+                self.lobby.reset()
+            return
+        step, rel_xy = tap
+        x, y = absolute(rel_xy, self.grid.width, self.grid.height)
+        logger.info("auto-queue -> %s (%d, %d)", step, x, y)
+        self.adb.tap(x, y)
+        self._last_menu_click_ts = now_ts

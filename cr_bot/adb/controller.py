@@ -49,7 +49,7 @@ class ADBController:
         dry_run: bool = False,
         capture_backend: str = "auto",
         input_backend: str = "auto",
-        deploy_style: str = "drag",
+        deploy_style: str = "tap",
         capture_bitrate: int = 12_000_000,
         capture_max_fps: int = 60,
         keep_awake: bool = True,

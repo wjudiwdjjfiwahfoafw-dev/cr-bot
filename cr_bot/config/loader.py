@@ -34,6 +34,9 @@ class BotConfig:
     min_action_cooldown_sec: float = 0.65
     human_jitter_px: int = 4
     auto_queue_battle: bool = False
+    #: a match must look over for this long before the runner believes it (one odd frame must
+    #: not end a battle; see cr_bot/vision/gamescreen.py)
+    battle_exit_confirm_s: float = 1.0
     templates_dir: str = "assets/card_templates"
     yolo_weights_path: Optional[str] = "weights/clash_yolov8n.onnx"
     yolo_confidence: float = 0.42
@@ -49,7 +52,8 @@ class BotConfig:
     input_backend_chain: List[str] = field(
         default_factory=lambda: ["swipe", "motionevent", "tap"]
     )
-    deploy_style: str = "drag"        # drag | tap
+    #: ``tap`` = select the card, then tap the arena tile (no dragging). See deploy_card().
+    deploy_style: str = "tap"
     deploy_verify_threshold: float = 9.0
     calibration_dir: str = "configs/calibration"
     #: application ids that count as "the game" - custom builds (Nulls Royale, private servers)
@@ -121,6 +125,7 @@ def load_config(path: str | Path) -> BotConfig:
         min_action_cooldown_sec=float(tactics_cfg.get("min_action_cooldown_sec", 0.65)),
         human_jitter_px=int(adb_cfg.get("human_jitter_px", 4)),
         auto_queue_battle=bool(raw.get("auto_queue_battle", False)),
+        battle_exit_confirm_s=float(raw.get("battle_exit_confirm_s", 1.0)),
         templates_dir=str(vision_cfg.get("templates_dir", "assets/card_templates")),
         yolo_weights_path=vision_cfg.get("yolo_weights_path", "weights/clash_yolov8n.onnx"),
         yolo_confidence=float(vision_cfg.get("yolo_confidence", 0.42)),
@@ -132,7 +137,7 @@ def load_config(path: str | Path) -> BotConfig:
         capture_max_fps=int(capture_cfg.get("max_fps", 30)),
         input_backend=str(input_cfg.get("backend", "auto")),
         input_backend_chain=list(input_cfg.get("chain", ["swipe", "motionevent", "tap"])),
-        deploy_style=str(input_cfg.get("deploy_style", "drag")),
+        deploy_style=str(input_cfg.get("deploy_style", "tap")),
         deploy_verify_threshold=float(input_cfg.get("verify_threshold", 9.0)),
         calibration_dir=str(calib_cfg.get("dir", "configs/calibration")),
         game_packages=list(game_cfg.get("packages", None) or

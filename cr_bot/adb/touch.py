@@ -302,7 +302,7 @@ class TouchInjector:
         coord: CoordMap,
         control=None,
         order: Sequence[str] = DEFAULT_ORDER,
-        deploy_style: str = "drag",
+        deploy_style: str = "tap",
         jitter_px: int = 2,
         rng: Optional[random.Random] = None,
     ) -> None:
