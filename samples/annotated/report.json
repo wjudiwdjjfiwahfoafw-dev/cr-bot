@@ -1,0 +1,22 @@
+[
+  {
+    "image": "calibration_preview.png",
+    "calibrated": true,
+    "note": "",
+    "labelled": 3,
+    "detected": 3,
+    "matched": 3,
+    "missed": 0,
+    "phantoms": [],
+    "duplicates": 0,
+    "wrong_side": 0,
+    "names_right": 0,
+    "names_wrong": [],
+    "names_unnamed": [
+      "musketeer",
+      "mega_knight",
+      "giant"
+    ],
+    "ms": 80.9
+  }
+]

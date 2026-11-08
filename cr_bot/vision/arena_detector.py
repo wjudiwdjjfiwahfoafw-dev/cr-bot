@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
@@ -235,6 +236,12 @@ class YOLOBackend:
         )
 
 
+def _hue_distance(a: float, b: float) -> float:
+    """Circular distance between two OpenCV hue values (0-179)."""
+    d = abs(float(a) - float(b)) % 180.0
+    return min(d, 180.0 - d)
+
+
 class ArenaUnitBackend:
     """Segmentation-first troop detector for real devices (``cr_bot.vision.unit_detector``).
 
@@ -256,6 +263,8 @@ class ArenaUnitBackend:
         identity_memory: Optional["UnitIdentityMemory"] = None,
         enable_segmentation: bool = True,
         enable_identity: bool = True,
+        recognizer=None,
+        enable_recognition: bool = True,
     ) -> None:
         self.segmenter = BlobUnitDetector()
         self.bar_reader = HealthBarReader()
@@ -268,6 +277,15 @@ class ArenaUnitBackend:
         self.learned_samples: int = 0
         #: consecutive frames in which only bars were found (see RESET_AFTER_STALE_FRAMES)
         self._stale_frames: int = 0
+        #: bar hue that means ally / enemy on this device, learned from the towers each frame
+        self._ally_hue: Optional[float] = None
+        self._enemy_hue: Optional[float] = None
+        #: names troops from the real sprite library (see cr_bot.vision.unit_recognizer)
+        self.enable_recognition = enable_recognition
+        self._recognizer = recognizer
+        self._recognizer_failed = False
+        #: pixels per tile of the frame being processed (needed by the naming pass)
+        self._last_ppt: float = 32.0
 
     def reset(self) -> None:
         self.segmenter.reset()
@@ -289,6 +307,7 @@ class ArenaUnitBackend:
     BARS_ONLY_CONFIDENCE = 0.45
 
     def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        self._last_ppt = max(8.0, float(pixels_per_tile(grid)))
         units: List[BlobUnit] = []
         if self.enable_segmentation:
             units = self.segmenter.detect(frame_bgr, grid)
@@ -297,7 +316,9 @@ class ArenaUnitBackend:
             # Nothing moving was found: either the background model is still warming up or the
             # arena is genuinely empty. Bars cover both cases (and are the only signal that
             # survives a stationary unit on the very first frames).
-            return self._detect_bars_only(frame_bgr, grid)
+            bars_only = self._detect_bars_only(frame_bgr, grid)
+            self._name_troops(bars_only, frame_bgr)
+            return bars_only
 
         described = [u for u in units if self._keep(u)]
         out = [self._describe(unit, frame_bgr, grid) for unit in described]
@@ -335,6 +356,7 @@ class ArenaUnitBackend:
             self._stale_frames = 0
 
         out = self._dedupe(out, grid)
+        self._name_troops(out, frame_bgr)
         self._remember(out, frame_bgr, grid)
         self.stats.add(described, bars=len(self.last_bars),
                        identified=sum(1 for d in out if not d.name.startswith("unknown_")))
@@ -384,6 +406,129 @@ class ArenaUnitBackend:
                 kept.append(det)
         return kept
 
+    #: how far above a unit's head its bar may sit, in tiles
+    BAR_ABOVE_UNIT_TILES = 4.0
+
+    def _bar_above(self, bbox: Tuple[int, int, int, int], ppt: float) -> Optional[HealthBar]:
+        """The health bar that belongs to this sprite box: above its head, centred on it."""
+        if not self.last_bars:
+            return None
+        x1, y1, x2, _y2 = bbox
+        cx = 0.5 * (x1 + x2)
+        best, best_dy = None, 1e9
+        for bar in self.last_bars:
+            bx1, by1, bx2, by2 = bar.bbox
+            gap = y1 - by2
+            if not (-0.3 * ppt <= gap <= self.BAR_ABOVE_UNIT_TILES * ppt):
+                continue
+            if abs(0.5 * (bx1 + bx2) - cx) > 0.75 * (x2 - x1) + 0.5 * (bx2 - bx1):
+                continue
+            if gap < best_dy:
+                best, best_dy = bar, gap
+        return best
+
+    #: a bar is taken as a tower's sample when its nearest tower is this much nearer than the next
+    TOWER_SAMPLE_MARGIN = 1.6
+    #: ... and when it is within this many tiles of that tower at all
+    TOWER_SAMPLE_RADIUS_TILES = 4.0
+
+    def _learn_team_colours(self, grid: ArenaGrid) -> None:
+        """Work out which bar colour means ally and which means enemy, from the known towers.
+
+        Which colour is "ours" is a frame-local fact, and it is not even stable across the game's
+        own screens: on one real capture our princess towers drew *red* bars while the enemy's
+        drew blue, so a fixed red=enemy rule reads every troop backwards (and that is exactly how
+        an enemy Mega Knight was being reported as an ally).
+
+        The six tower positions are known exactly from calibration, so the bars sitting on them
+        are sampled each frame and the colours that actually appear there become the answer. A
+        bar only counts as a tower's sample when its nearest tower is clearly the nearest one —
+        otherwise it is a troop fighting at that tower, whose colour says nothing about sides.
+        """
+        ally_samples: List[Tuple[float, float]] = []
+        enemy_samples: List[Tuple[float, float]] = []
+        for bar in self.last_bars:
+            hue = float(getattr(bar, "hue", -1.0))
+            if hue < 0:
+                continue
+            bx1, by1, bx2, by2 = bar.bbox
+            tx, ty = grid.pixel_to_tile(0.5 * (bx1 + bx2), 0.5 * (by1 + by2))
+            distances = sorted(
+                (math.hypot(tx - tower_x, ty - tower_y), name)
+                for name, (tower_x, tower_y) in grid.TOWER_TILES.items()
+            )
+            if not distances:
+                continue
+            nearest_d, nearest_name = distances[0]
+            if nearest_d > self.TOWER_SAMPLE_RADIUS_TILES:
+                continue
+            if len(distances) > 1 and distances[1][0] < nearest_d * self.TOWER_SAMPLE_MARGIN:
+                continue
+            if nearest_name.startswith("ally"):
+                ally_samples.append((nearest_d, hue))
+            elif nearest_name.startswith("enemy"):
+                enemy_samples.append((nearest_d, hue))
+        if ally_samples and enemy_samples:
+            self._ally_hue = float(np.median([h for _d, h in ally_samples]))
+            self._enemy_hue = float(np.median([h for _d, h in enemy_samples]))
+
+    def _correct_side(self, reported: Side, hue: float) -> Side:
+        """Prefer the learned team colour over the reader's fixed colour guess."""
+        if self._ally_hue is None or self._enemy_hue is None:
+            return reported
+        d_ally = _hue_distance(hue, self._ally_hue)
+        d_enemy = _hue_distance(hue, self._enemy_hue)
+        if abs(d_ally - d_enemy) < 12.0:
+            return reported           # a colour between the two: leave it to the reader
+        return Side.ALLY if d_ally < d_enemy else Side.ENEMY
+
+    @property
+    def recognizer(self):
+        """The sprite recogniser, built on first use and kept off if its assets are missing."""
+        if not self.enable_recognition or self._recognizer_failed:
+            return None
+        if self._recognizer is None:
+            from cr_bot.vision.unit_recognizer import UnitRecognizer
+
+            self._recognizer = UnitRecognizer()
+        if not self._recognizer.is_ready:
+            self._recognizer_failed = True
+            return None
+        return self._recognizer
+
+    #: how long (ms) naming may cost per frame before it is switched off again
+    RECOGNITION_BUDGET_MS = 40.0
+
+    def _name_troops(self, units: List[RawDetection], frame_bgr: np.ndarray) -> None:
+        """Replace ``unknown_*`` labels with card names where the evidence is convincing.
+
+        The recogniser already refuses anything below its score/margin floors, so the only job
+        here is to not spend the frame's budget on it. Naming is optional by design: an unnamed
+        troop still has a position, a side and a size class, which is enough to defend against;
+        a *wrongly* named one makes the brain pick the wrong counter.
+        """
+        recognizer = self.recognizer
+        if recognizer is None:
+            return
+        anonymous = [unit for unit in units if unit.name.startswith("unknown_")]
+        if not anonymous:
+            return
+        started = time.perf_counter()
+        for unit in anonymous:
+            if 1000.0 * (time.perf_counter() - started) > self.RECOGNITION_BUDGET_MS:
+                logger.debug("naming budget exhausted with %d troop(s) still unnamed",
+                             len(anonymous))
+                break
+            has_bar = self._bar_above(unit.pixel_bbox, self._last_ppt) is not None
+            found = recognizer.identify(frame_bgr, unit.pixel_bbox, has_bar=has_bar)
+            if found is None:
+                continue
+            info = get_card_info(found.card)
+            unit.name = found.card
+            if info is not None:
+                unit.weight_class = info.weight_class
+                unit.move_type = info.move_type
+
     def _describe(self, unit: BlobUnit, frame_bgr: np.ndarray, grid: ArenaGrid) -> RawDetection:
         name = unit.fallback_label
         move_type = MoveType.GROUND
@@ -406,9 +551,17 @@ class ArenaUnitBackend:
                     if info.weight_class not in (WeightClass.SPELL_PROJECTILE, WeightClass.BUILDING):
                         weight = info.weight_class
 
+        # The bar above a unit's head is the game's own statement of team. The sprite's own
+        # colours are not reliable evidence -- a tower's blue level pill, an elixir puddle or a
+        # spell's glow all outvote them, which is how an enemy Mega Knight was reported as an ally.
+        side = unit.side
+        bar = self._bar_above(unit.bbox, ppt=pixels_per_tile(grid))
+        if bar is not None:
+            side = self._correct_side(bar.side, float(getattr(bar, "hue", 0.0)))
+
         return RawDetection(
             name=name,
-            side=unit.side,
+            side=side,
             tile_x=unit.tile_x,
             tile_y=unit.tile_y,
             pixel_bbox=unit.bbox,
@@ -472,6 +625,31 @@ class ArenaUnitBackend:
     #: a 0.3-tile strip is not reliable evidence of anything, so it is not reported at all.
     MIN_FALLBACK_BAR_TILES = 0.90
 
+    @staticmethod
+    def _bar_white_share(frame_bgr: np.ndarray, bar) -> float:
+        """Fraction of the bar's pixels that are near-white (i.e. text inside the capsule)."""
+        x1, y1, x2, y2 = [int(v) for v in bar.bbox]
+        h, w = frame_bgr.shape[:2]
+        patch = frame_bgr[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
+        if patch.size == 0:
+            return 0.0
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        white = (hsv[:, :, 2] > 195) & (hsv[:, :, 1] < 70)
+        return float(white.mean())
+
+    @staticmethod
+    def _bar_saturation(frame_bgr: np.ndarray, bar) -> float:
+        """Mean HSV saturation of the bar's own pixels (not its capsule)."""
+        x1, y1, x2, y2 = [int(v) for v in bar.bbox]
+        h, w = frame_bgr.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            return 0.0
+        patch = frame_bgr[y1:y2, x1:x2]
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        return float(np.median(hsv[:, :, 1]))
+
     def _detect_bars_only(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
         """Last-resort detection from health bars alone.
 
@@ -488,6 +666,7 @@ class ArenaUnitBackend:
         bars = self.bar_reader.read(frame_bgr, grid, ppt,
                                     min_width_tiles=self.MIN_FALLBACK_BAR_TILES)
         self.last_bars = bars
+        self._learn_team_colours(grid)
 
         out: List[RawDetection] = []
         foot_offset = self.BAR_TO_FOOT_TILES * ppt
@@ -507,6 +686,12 @@ class ArenaUnitBackend:
             # coloured strip is a tower ring or a piece of decoration.
             if not getattr(bar, "has_outline", True):
                 continue
+            if (y2 - _y1) < self.MIN_FALLBACK_BAR_HEIGHT_PX:
+                continue
+            if self._bar_saturation(frame_bgr, bar) < self.MIN_FALLBACK_BAR_SATURATION:
+                continue
+            if self._bar_white_share(frame_bgr, bar) > self.MAX_FALLBACK_BAR_WHITE_SHARE:
+                continue
             cx = 0.5 * (x1 + x2)
             foot_y = y2 + foot_offset
             tx, ty = grid.pixel_to_tile(cx, foot_y)
@@ -514,6 +699,13 @@ class ArenaUnitBackend:
                 continue
             if self._near_tower(grid, tx, ty):
                 continue    # tower HP bar, not a troop
+            # The game draws a tower's bar just above the tower, so the bar itself lands *closer*
+            # to the tower centre than the foot estimate does. Check the bar's own centre too
+            # (with the wider clearance) — otherwise a tower's bar that sits a little high
+            # escapes the foot test and reports a phantom troop parked on the tower.
+            bar_tx, bar_ty = grid.pixel_to_tile(0.5 * (x1 + x2), 0.5 * (_y1 + y2))
+            if self._near_tower(grid, bar_tx, bar_ty, radius_tiles=self.TOWER_BAR_CLEARANCE_TILES):
+                continue
             if not self._inside_playfield(grid, ty):
                 # Above the enemy king and below your own king there is no playfield: that is
                 # the enemy's castle wall and name plate at the top, and the wall plus the card
@@ -538,6 +730,21 @@ class ArenaUnitBackend:
         if out_of_field:
             logger.debug("bars-only fallback: ignored %d bar(s) below the play field", out_of_field)
         return self._dedupe(out, grid)
+
+    #: A game HP bar is painted in a saturated team colour. Scenery that *looks* like a bar - a
+    #: roof eave, a tower's ornamental ledge, a stone edge - is dull: measured on real screenshots
+    #: the phantoms sat at saturation 35-48 while every genuine bar was above 70. This floor is
+    #: what keeps "no troops on the board" reporting no troops.
+    MIN_FALLBACK_BAR_SATURATION = 60.0
+    #: a bar whose centre is this close to a known tower belongs to that tower
+    TOWER_BAR_CLEARANCE_TILES = 2.0
+    #: a bar thinner than this many pixels is a stone edge, not a bar
+    MIN_FALLBACK_BAR_HEIGHT_PX = 4
+    #: A unit's HP bar is a solid fill. A tower's *level badge* — the little "16" pill beside a
+    #: tower — is a coloured capsule full of white text, and it was the last phantom the fallback
+    #: produced on a real screenshot. Measured white-pixel share: real bars 0.00-0.02, badges
+    #: 0.11-0.22, so the split is wide.
+    MAX_FALLBACK_BAR_WHITE_SHARE = 0.08
 
     #: the fraction of the calibrated arena rectangle that is actually play field (the rest is
     #: the card tray / elixir strip at the bottom and the enemy's name plate at the top)

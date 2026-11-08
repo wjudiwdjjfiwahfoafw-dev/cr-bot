@@ -1,0 +1,8 @@
+{
+  "note": "Real 720x1280 capture of a trainer match (opponent: 'Ausbilder Jonas'). All three visible troops belong to the OPPONENT: the Giant has already crossed the river and is coming toward my towers, the Mega Knight sits by the enemy king tower and the Musketeer behind the enemy left princess tower. My own hand (Musketeer / Minion Horde / Goblin Gang) is visible in the card tray. Boxes are sprite-only, health bars excluded.",
+  "expect": [
+    {"name": "giant",       "box": [63, 487, 241, 630], "card": "giant",       "side": "enemy", "note": "crossed the river, walking down the left lane"},
+    {"name": "mega knight", "box": [497, 285, 620, 395], "card": "mega_knight", "side": "enemy", "note": "in front of the enemy king tower"},
+    {"name": "musketeer",   "box": [92, 205, 180, 262],  "card": "musketeer",   "side": "enemy", "note": "behind the enemy left princess tower"}
+  ]
+}

@@ -383,6 +383,18 @@ class ScrcpySession:
         self._stale_servers_killed = 0
 
     # -- lifecycle -----------------------------------------------------------------
+    def _resolve_jar(self) -> None:
+        """Pick the server jar and parse its real version, once, before anything is planned."""
+        jar = find_scrcpy_jar(self.jar_path)
+        self._jar = jar
+        self.jar_version = proto.parse_server_version(jar.name)
+        logger.debug(
+            "scrcpy server jar: %s -> protocol %s (%s)",
+            jar.name,
+            ".".join(str(p) for p in self.jar_version),
+            "modern" if proto.is_modern_version(self.jar_version) else "legacy",
+        )
+
     def _attempts(self) -> List[Tuple[str, Dict[str, str]]]:
         """Server configurations tried in order before giving up.
 
@@ -405,7 +417,15 @@ class ScrcpySession:
             # to its own abstract socket name, which sidesteps a stale or half-dead predecessor
             # that ``adb shell`` housekeeping cannot see.
             attempts.append(("fresh socket id", {"scid": "2b3a7f"}))
+            # Some Samsung encoders refuse the requested size/bitrate outright ("No usable H.264
+            # encoder for this resolution/bitrate"). A smaller stream is better than no control
+            # channel at all: 512 px is still ample for tile geometry.
+            attempts.append(("smaller stream", {"max_size": 512, "video_bit_rate": 4_000_000,
+                                                "max_fps": 20}))
         else:
+            # Legacy (1.x) names only. Handing a 1.x server ``video_bit_rate`` gets
+            # "Unknown server option" and the option is silently ignored - worse, the attempt
+            # then fails for a reason that has nothing to do with the thing being tested.
             attempts.append(("no fps cap", {"max_fps": 0}))
             attempts.append(("lower bitrate", {"bit_rate": min(self.bitrate, 4_000_000)}))
             attempts.append(("google encoder", {"encoder_name": "OMX.google.h264.encoder"}))
@@ -415,6 +435,13 @@ class ScrcpySession:
         self.serial = self.adb.connect(self.adb.serial)
         self.display = self.adb.display_info()
         self._kill_stale_servers()
+
+        # The version *must* be known before the ladder is planned: it decides which option names
+        # exist at all (``bit_rate`` vs ``video_bit_rate``, ``encoder_name`` vs ``video_encoder``).
+        # It used to default to (1, 24, 0) until the jar was parsed inside _launch_server(), so a
+        # modern jar was driven with legacy options — the server answered "Unknown server option:
+        # bit_rate", and every attempt after the first could never work, on any device.
+        self._resolve_jar()
 
         failures: List[Tuple[str, str]] = []
         seen: set = set()
@@ -657,7 +684,7 @@ class ScrcpySession:
         return int(round(long_side * scale))
 
     def _launch_server(self, overrides: Optional[Dict[str, str]] = None) -> subprocess.Popen:
-        jar = find_scrcpy_jar(self.jar_path)
+        jar = getattr(self, "_jar", None) or find_scrcpy_jar(self.jar_path)
         remote_jar = f"/data/local/tmp/{jar.name}"
         self.jar_version = proto.parse_server_version(jar.name)
         self.adb.push(jar, "/data/local/tmp/")

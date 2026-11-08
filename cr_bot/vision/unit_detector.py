@@ -198,11 +198,21 @@ class ArenaBackgroundModel:
         self._frames_seen = 0
         #: per-pixel number of consecutive frames this pixel has been foreground
         self._foreground_age: Optional[np.ndarray] = None
+        #: pixels covered by a health bar this frame; never absorbed into the background
+        self._barred: Optional[np.ndarray] = None
         #: per-pixel "the content changed" counter, used to decide when a region is static
         self._change_age: Optional[np.ndarray] = None
         #: how many frames a pixel needed to settle the first time (warm-up grace)
         self._settled: Optional[np.ndarray] = None
         self._shift_cooldown = 0
+        #: cached downscaled background for global_shift() (it is the same every frame)
+        self._shift_reference: Optional[np.ndarray] = None
+        #: (shift, how many frames in a row it has been estimated)
+        self._shift_pending: Optional[Tuple[Tuple[int, int], int]] = None
+        #: the last raw viewpoint estimate (before corroboration), or None if unavailable
+        self._last_estimate: Optional[Tuple[int, int]] = None
+        #: frames since the model was last warped (see shift_is_chain)
+        self._frames_since_shift = 10_000
         #: regions the caller has vouched for as "a unit is here" (see protect_from_absorb)
         self._protected: Optional[np.ndarray] = None
         #: uint8 view of the frame being processed, so update() need not re-cast it
@@ -457,13 +467,171 @@ class ArenaBackgroundModel:
                             self._background[adopt] += self.ABSORB_RATE * (
                                 frame[adopt] - self._background[adopt]
                             )
+                            # A health bar is the game's own statement that there is a unit
+                            # here. A troop that stands still (a spawned building, a ranged
+                            # unit parked at the bridge, a troop waiting on defence) has
+                            # constant pixels, so without this it is adopted into the
+                            # background after ABSORB_AFTER_FRAMES and becomes invisible —
+                            # a *static* unit disappearing is the worst kind of miss,
+                            # because nothing else in the frame hints that it is there.
+                            if self._barred is not None and self._barred.shape == adopt.shape:
+                                adopt &= ~self._barred
+                            if adopt.any():
+                                self._background[adopt] += self.ABSORB_RATE * (
+                                    frame[adopt] - self._background[adopt]
+                                )
                             self._foreground_age[adopt] = 0
                             self._change_age[adopt] = 0
 
+        self._frames_since_shift += 1
         self._prev = self._frame_u8
         self._background_u8 = None      # invalidate the uint8 mirror after an update
+        self._shift_reference = None
         self._frames_seen += 1
         self._protected = None          # one frame only: evidence must be refreshed every frame
+        self._barred = None             # ditto
+        self._shift_reference = None    # cached downscaled background for global_shift()
+
+    #: a frame that moved by more than this many work-scale pixels is not the same viewpoint
+    MAX_GLOBAL_SHIFT_PX = 24
+    #: how much to sub-sample before the shift search (see global_shift). At 1/4 scale a 2 px
+    #: wobble is reported as 1 px, which is worse than the resampling it is meant to avoid.
+    SHIFT_SEARCH_SCALE = 2.0
+
+    def global_shift(self, frame: np.ndarray) -> Optional[Tuple[int, int]]:
+        """Raw estimate; see :meth:`confirmed_shift` for the one that should be applied."""
+        """Pixel offset of ``frame`` relative to the learned background, ``(dx, dy)``.
+
+        A streamed capture and a hand-held phone both shift the picture by a pixel or two
+        between frames; an emulator window being resized can shift it much further. The whole
+        background-subtraction model assumes a fixed viewpoint, so a shift makes *every* edge in
+        the arena differ from the model at once: on a real screenshot a 2 px shift produced 20
+        phantom "troops" in one frame, which is exactly the flicker this has to avoid.
+
+        Returns ``None`` when the motion is too large to be a viewpoint wobble (a real arena
+        change, a scene cut), in which case the caller should treat the model as stale rather
+        than try to compensate.
+        """
+        if self._background is None:
+            return None
+        bg = self._background
+        if bg.shape[:2] != frame.shape[:2]:
+            return None
+        # Sub-sample first, convert to grey second: collapsing the colour channels of the full
+        # frame is ~14 ms on a 720p capture (three strided passes over a million floats), while
+        # downscaling the colour image is 0.9 ms and phase correlation at 1/4 scale is 0.6 ms.
+        # A one-pixel wobble is still sub-pixel at that scale, which is exactly what phase
+        # correlation is good at, and the answer is scaled back and rounded.
+        factor = self.SHIFT_SEARCH_SCALE
+        size = (max(32, int(frame.shape[1] / factor)), max(32, int(frame.shape[0] / factor)))
+        # The background side is the same every frame, so its downscale is cached; only the
+        # incoming frame is processed per call.
+        bg_small = self._shift_reference
+        if bg_small is None or bg_small.shape[::-1] != size:
+            bg_u8 = bg if bg.dtype == np.uint8 else np.clip(bg, 0, 255).astype(np.uint8)
+            try:
+                ref = cv2.resize(bg_u8, size, interpolation=cv2.INTER_AREA)
+            except cv2.error:
+                return None
+            if ref.ndim == 3:
+                ref = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
+            bg_small = self._shift_reference = ref.astype(np.float32)
+        cur = frame if frame.dtype == np.uint8 else np.clip(frame, 0, 255).astype(np.uint8)
+        try:
+            cur_small = cv2.resize(cur, size, interpolation=cv2.INTER_AREA)
+        except cv2.error:
+            return None
+        if cur_small.ndim == 3:
+            cur_small = cv2.cvtColor(cur_small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        win = cv2.createHanningWindow((bg_small.shape[1], bg_small.shape[0]), cv2.CV_32F)
+        try:
+            (dx, dy), response = cv2.phaseCorrelate(bg_small, cur_small, win)
+        except cv2.error:
+            return None
+        if not np.isfinite(dx) or not np.isfinite(dy) or response < 0.05:
+            return None
+        dx, dy = dx * factor, dy * factor
+        if abs(dx) > self.MAX_GLOBAL_SHIFT_PX or abs(dy) > self.MAX_GLOBAL_SHIFT_PX:
+            self._last_estimate = None
+            return None
+        # below half a pixel nothing needs moving, and returning (0, 0) keeps the common case free
+        self._last_estimate = (int(round(dx)), int(round(dy)))
+        return self._last_estimate
+
+    def note_shift(self, shift: Tuple[int, int]) -> None:
+        """Re-anchor the model to a new viewpoint.
+
+        The model, not the frame, is moved: the incoming frame is the better-looking copy and
+        warping it every frame would blur it, and the tile grid the caller uses is expressed in
+        the current frame's pixels anyway. ``_prev`` moves with the background so the
+        "has this pixel changed" test keeps comparing like with like.
+        """
+        dx, dy = shift
+        if dx == 0 and dy == 0:
+            return
+        matrix = np.float32([[1, 0, dx], [0, 1, dy]])
+        for attr in ("_background", "_prev", "_foreground_age", "_change_age", "_barred"):
+            buf = getattr(self, attr, None)
+            if buf is None or not isinstance(buf, np.ndarray) or buf.ndim not in (2, 3):
+                continue
+            if buf.shape[:2] != (self._background.shape[:2] if self._background is not None else buf.shape[:2]):
+                continue
+            flags = cv2.INTER_NEAREST
+            shifted = cv2.warpAffine(buf, matrix, (buf.shape[1], buf.shape[0]), flags=flags,
+                                     borderMode=cv2.BORDER_REPLICATE)
+            setattr(self, attr, shifted)
+        self._frames_since_shift = 0
+        self._background_u8 = None
+
+    #: a one-pixel estimate is within the noise of the estimator, so such a shift must be seen
+    #: this many frames in a row before the model is moved. A single spurious 1-px correction
+    #: resamples the whole background and produces small differences along every arena edge --
+    #: measured on the synthetic benchmark: 49 phantom units from one bad estimate.
+    CONFIRM_SHIFT_FRAMES = 2
+
+    #: a second shift this soon after one was applied is not a wobble; the model is stale
+    SHIFT_CHAIN_FRAMES = 6
+
+    def confirmed_shift(self, frame: np.ndarray) -> Tuple[int, int]:
+        """The shift that should actually be applied, after corroborating small estimates."""
+        estimate = self.global_shift(frame)
+        if estimate is None or estimate == (0, 0):
+            self._shift_pending = None
+            return (0, 0)
+        # Every estimate must be corroborated, however large. Phase correlation is fooled by a
+        # *content* change as easily as by a viewpoint change: a troop appearing in the arena
+        # produced (-2, -2) out of nowhere in a test that only ever showed a stationary sprite.
+        # The distinction that holds is persistence -- scenery that moved is still moved next
+        # frame, a troop that appeared is simply there -- so nothing is applied until the same
+        # estimate arrives twice in a row.
+        if self._shift_pending is not None and self._shift_pending[0] == estimate:
+            self._shift_pending = (estimate, self._shift_pending[1] + 1)
+        else:
+            self._shift_pending = (estimate, 1)
+        if self._shift_pending[1] >= self.CONFIRM_SHIFT_FRAMES:
+            self._shift_pending = None
+            return estimate
+        return (0, 0)
+
+    def shift_is_chain(self) -> bool:
+        """True when another shift arrives right after one was applied.
+
+        Warping an already-warped model compounds the resampling of every arena edge, which is
+        precisely how a "compensated" frame ends up covered in phantom units. When the viewpoint
+        moves twice in quick succession the cheap, reliable recovery is to re-learn the arena.
+        """
+        return 0 < self._frames_since_shift <= self.SHIFT_CHAIN_FRAMES
+
+    @staticmethod
+    def shift_frame(frame: np.ndarray, shift: Tuple[int, int]) -> np.ndarray:
+        """Translate ``frame`` by ``shift`` so it lines up with the background again."""
+        dx, dy = shift
+        if dx == 0 and dy == 0:
+            return frame
+        matrix = np.float32([[1, 0, dx], [0, 1, dy]])
+        rows, cols = frame.shape[:2]
+        return cv2.warpAffine(frame, matrix, (cols, rows), flags=cv2.INTER_LINEAR,
+                              borderMode=cv2.BORDER_REPLICATE)
 
     def protect_from_absorb(self, mask: np.ndarray) -> None:
         """Mark regions that must never be adopted into the background.
@@ -559,6 +727,9 @@ class HealthBar:
     #: the building) and a bright patch of floor do not. Only outline-backed bars are used as
     #: evidence for side, splitting and size — the others are still reported, but as hints.
     has_outline: bool = True
+    #: OpenCV hue (0-179) of the bar's fill. Kept because *which* hue means ally is frame-local:
+    #: see ArenaUnitBackend._learn_team_colours.
+    hue: float = -1.0
 
     @property
     def center_px(self) -> Tuple[float, float]:
@@ -662,12 +833,25 @@ class HealthBarReader:
                             fill_width=bw,
                             total_width=bar[2] - bar[0],
                             has_outline=self._has_dark_outline(value, bx, by, bw, bh, ppt),
+                            hue=float(self._median_hue(roi, bx, by, bw, bh, side)),
                         )
                     )
         return self._merge(bars)
 
     #: share of the pixels just above/below a candidate bar that must be UI-dark
     OUTLINE_DARK_SHARE = 0.55
+
+    @staticmethod
+    def _median_hue(roi_bgr: np.ndarray, bx: int, by: int, bw: int, bh: int, side) -> float:
+        """Median hue of the *bar's own* pixels, ignoring the dark trough and the capsule."""
+        patch = roi_bgr[by:by + bh, bx:bx + bw]
+        if patch.size == 0:
+            return -1.0
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV).reshape(-1, 3)
+        saturated = hsv[(hsv[:, 1] > 90) & (hsv[:, 2] > 60)]
+        if saturated.size == 0:
+            return -1.0
+        return float(np.median(saturated[:, 0]))
 
     @staticmethod
     def _value_channel(roi_bgr: np.ndarray) -> np.ndarray:
@@ -1193,6 +1377,14 @@ class BlobUnitDetector:
     #: nothing is lost, and the per-frame cost drops by ~4x on a phone-sized capture
     WORK_SCALE = 0.5
 
+    #: fraction of the arena whose pixels changed frame-to-frame above which the camera moved
+    #: (not troops arriving: no troop covers a quarter of the board in one frame)
+    #: Measured on a real screenshot: three troops appearing at once moved 1.5% of the arena's
+    #: pixels; a 1-6 px viewpoint shift moved 15-42%. Anything in between would be a zoom.
+    MOTION_SHIFT_FRACTION = 0.10
+    #: how long the viewpoint may stay moved before the arena is re-learned from scratch
+    RESET_AFTER_SHIFT_FRAMES = 20
+
     def __init__(
         self,
         background: Optional[ArenaBackgroundModel] = None,
@@ -1207,6 +1399,10 @@ class BlobUnitDetector:
         #: towers/bridges differ from the learned floor too, but they are not troops
         self.structures = ArenaStructureSuppressor()
         self.last_bars: List[HealthBar] = []
+        #: last frame-to-frame viewpoint shift that was compensated, in work-scale pixels
+        self._last_shift: Tuple[int, int] = (0, 0)
+        #: consecutive frames where the viewpoint did not match the model
+        self._shifted_frames: int = 0
         self.last_dropped: int = 0
         self._ppt_cache: Dict[Tuple[int, int, int], float] = {}
 
@@ -1267,16 +1463,57 @@ class BlobUnitDetector:
         )
         self.background.set_tile_scale(ppt * scale)
 
+        # Keep the model on a fixed viewpoint: a streamed or hand-held capture wobbles by a
+        # pixel or two, and uncompensated that turns every arena edge into a phantom troop.
+        self._last_shift = self.background.confirmed_shift(small)
+
         ready = self.background.is_ready
         state = self.background.state(small) if ready else np.full(
             small.shape[:2], BG_UNKNOWN, np.uint8)
         motion = self.background.motion(small) if ready else np.zeros(small.shape[:2], np.uint8)
+        # NB: this deliberately does not look at the raw shift *estimate*: phase correlation
+        # returns a non-zero offset for plenty of ordinary frames (a troop appearing is enough),
+        # and acting on that would drop good frames. Only the corroborated estimate counts, plus
+        # the independent motion test below.
+        moved = self.background.recently_shifted
+        if ready and not moved:
+            # Second, independent guard. The shift search runs at a quarter scale, where a
+            # one-pixel wobble is a quarter pixel and can round away -- and one such frame was
+            # still worth 40 phantoms. But a viewpoint change has a signature that costs nothing
+            # to read: *motion* across most of the arena at once (every edge moves). Troops
+            # arriving never cover a quarter of the board; a camera move always does.
+            moved = float(np.count_nonzero(motion)) / float(motion.size) > self.MOTION_SHIFT_FRACTION
+        if ready and moved:
+            # The arena moved under the model this frame: a scroll, a zoom, or a viewpoint
+            # wobble. *Everything* differs from both the background and the previous frame, and
+            # reporting that is how one frame becomes 40 phantom troops (measured: a 1-px shift
+            # gave 40; a 2-px wobble gave 20). Saying nothing for those frames is honest and
+            # invisible to a brain reading a 10-20 fps stream.
+            #
+            # The background model is *frozen* rather than fed: blending the shifted frame in
+            # would slowly drag the learned arena onto the new viewpoint, and warping the model
+            # to follow was tried too -- it leaves residual error along every edge and 16 phantom
+            # units survived it. The frame is still recorded so the next motion measurement is
+            # against the right picture. Only a move that *persists* means the arena really has
+            # changed under us (a zoom, a resolution change), and then the model is re-learned.
+            self._shifted_frames += 1
+            if self._shifted_frames >= self.RESET_AFTER_SHIFT_FRAMES:
+                logger.info("detector: viewpoint stayed moved for %d frames; re-learning the "
+                            "arena", self._shifted_frames)
+                self.background.reset()
+                self._shifted_frames = 0
+            self.background.update(small, np.full(small.shape[:2], 255, np.uint8))
+            return []
+        self._shifted_frames = 0
 
         units: List[BlobUnit] = []
         if ready:
             # Bars are read in *big* coordinates: their colour is the least ambiguous team
             # evidence available, so they are also used as anchors for splitting blobs.
             self.last_bars = self.bars.read(frame_bgr, grid, ppt)
+            if self.last_bars:
+                self.background._barred = self._bar_protection(
+                    self.last_bars, small.shape, (ax1, ay1), scale, ppt)
             mask = self._detection_mask(state, motion)
             units = self._from_mask(
                 mask, motion, roi, small, grid, ppt, (ax1, ay1), scale, self.last_bars
@@ -1553,6 +1790,22 @@ class BlobUnitDetector:
             cv2.drawContours(blob_mask, [cnt], -1, 255, -1)
             patch = roi[max(0, y1 - ay1):max(1, y2 - ay1), max(0, x1 - ax1):max(1, x2 - ax1)]
             small_mask = blob_mask[by:by2, bx:bx2]
+
+            # Tighten the reported box to the contour's own bounds. The contour here is the
+            # *merged* outline, which for a bar-anchored merge is a union of pieces and can be
+            # noticeably larger than the sprite; a caller that crops this box (the sprite
+            # recogniser, the HUD, identity learning) then gets mostly arena floor. The unit's
+            # real extent is the contour, not the union of its fragments.
+            if anchor is None and cnt is not None and len(cnt):
+                tx, ty, tw, th = cv2.boundingRect(cnt)
+                tx1 = int(round(tx * inv)) + ax1
+                ty1 = int(round(ty * inv)) + ay1
+                tx2 = int(round((tx + tw) * inv)) + ax1
+                ty2 = int(round((ty + th) * inv)) + ay1
+                if tx2 - tx1 >= 0.5 * (x2 - x1) and ty2 - ty1 >= 0.5 * (y2 - y1):
+                    x1, y1, x2, y2 = tx1, ty1, tx2, ty2
+                    w_tiles = (x2 - x1) / ppt
+                    h_tiles = (y2 - y1) / ppt
 
             area = float(cv2.countNonZero(small_mask))
             solidity = area / float(max(1.0, (bx2 - bx) * (by2 - by)))
@@ -1854,8 +2107,8 @@ class BlobUnitDetector:
         cx = 0.5 * (bx1 + bx2)
         return y1 <= by1 and by2 <= y2 and x1 <= cx <= x2
 
-    @staticmethod
-    def _bar_for(x1: int, y1: int, x2: int, y2: int, bars: Sequence[HealthBar],
+    @classmethod
+    def _bar_for(cls, x1: int, y1: int, x2: int, y2: int, bars: Sequence[HealthBar],
                  ppt: float) -> Optional[HealthBar]:
         """The bar belonging to a blob: horizontally overlapping and sitting just above it."""
         best: Optional[HealthBar] = None
@@ -1876,7 +2129,7 @@ class BlobUnitDetector:
             # (a troop standing directly behind this one), and taking it would put this blob
             # on the wrong side and in the wrong size class. 0.85 ppt keeps tall units whose
             # bar floats over their raised weapon, and rejects the accidental neighbour.
-            if dy > self.BAR_MAX_GAP_TILES * ppt and not self._bar_inside(x1, y1, x2, y2, bar):
+            if dy > cls.BAR_MAX_GAP_TILES * ppt and not cls._bar_inside(x1, y1, x2, y2, bar):
                 continue
             # a unit's bar spans roughly its own width; anything much narrower is arena clutter
             width_ratio = bar.total_width / blob_w

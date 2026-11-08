@@ -336,3 +336,56 @@ def test_foreground_package_returns_empty_when_nothing_matches() -> None:
             return ""
 
     assert _Dump().foreground_package() == ""
+
+
+# ======================================================================================
+# the retry ladder must speak the same protocol dialect as the jar it launches
+# ======================================================================================
+
+def test_the_ladder_uses_the_real_jar_version_not_a_hardcoded_one() -> None:
+    """The bug that made scrcpy unusable on every device.
+
+    ``jar_version`` defaulted to (1, 24, 0) until ``_launch_server`` parsed the jar — but the
+    ladder was planned *before* that, from the default. A v5 jar was therefore driven with
+    legacy option names, the server answered ``Unknown server option: bit_rate``, and every
+    attempt after the first was guaranteed to fail.
+    """
+    from cr_bot.adb.scrcpy_multiclient import ScrcpySession
+
+    session = ScrcpySession.__new__(ScrcpySession)
+    session.jar_path = None
+    session.bitrate = 12_000_000
+    session._resolve_jar()
+
+    assert session.jar_version[0] >= 2, "the bundled jar is modern; the test assumes that"
+    legacy_names = {"bit_rate", "encoder_name", "lock_video_orientation"}
+    for label, options in session._attempts():
+        clash = legacy_names & set(options)
+        assert not clash, f"attempt {label!r} passes legacy option(s) {clash} to a modern server"
+
+
+def test_a_legacy_jar_gets_legacy_options_only() -> None:
+    from cr_bot.adb import scrcpy_protocol as proto
+    from cr_bot.adb.scrcpy_multiclient import ScrcpySession
+
+    session = ScrcpySession.__new__(ScrcpySession)
+    session.jar_path = "scrcpy-server-v1.24.jar"
+    session.bitrate = 12_000_000
+    session._resolve_jar()
+    assert session.jar_version == (1, 24, 0)
+    modern_names = {"video_bit_rate", "video_encoder", "scid", "audio", "video"}
+    for label, options in session._attempts():
+        clash = modern_names & set(options)
+        assert not clash, f"attempt {label!r} passes modern option(s) {clash} to a 1.x server"
+
+
+def test_the_ladder_offers_a_smaller_stream_for_refusing_encoders() -> None:
+    from cr_bot.adb.scrcpy_multiclient import ScrcpySession
+
+    session = ScrcpySession.__new__(ScrcpySession)
+    session.jar_path = None
+    session.bitrate = 12_000_000
+    session._resolve_jar()
+    labels = [label for label, _ in session._attempts()]
+    assert any("smaller" in label for label in labels), labels
+    assert any("fresh socket" in label for label in labels), labels
