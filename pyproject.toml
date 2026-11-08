@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clash-royale-mk-zap-bait-bot"
-version = "1.0.0"
-description = "Hybrid YOLOv8 + OpenCV Clash Royale Tactical Bot tailored for MK Miner Skeleton Barrel Zap Bait"
+version = "2.3.0"
+description = "Clash Royale tactical bot that plays on real Android devices over ADB (scrcpy capture + verified touch injection)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.24.0",
     "PyYAML>=6.0",
     "Pillow>=10.0.0",
+    "av>=10.0.0",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["cr_bot*"]
+
+[tool.setuptools.package-data]
+# The scrcpy server jar is pushed to the device at startup; it must ship with the package.
+"cr_bot" = ["third_party/*.jar"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

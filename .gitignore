@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+weights/
+*.onnx
+*.pt
+
+# Generated calibration artefacts (per-device; regenerate with scripts/calibrate_device.py)
+configs/calibration/*.json
+configs/calibration/*.preview.png
+calibration_preview_out.png
+probe_placement.png
+
+# learned, device-specific sprite samples (safe to delete)
+assets/unit_identity/

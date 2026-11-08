@@ -21,6 +21,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cr_bot.adb.controller import ADBController
+from cr_bot.arena.device_calibrator import (
+    DeviceCalibrator,
+    calibration_path,
+    load_calibration,
+    render_calibration_preview,
+    save_calibration,
+)
 from cr_bot.arena.grid import ArenaGrid
 from cr_bot.config.loader import load_config
 from cr_bot.vision.elixir_tracker import ElixirReader
@@ -35,16 +42,12 @@ def main() -> int:
     args = parser.parse_args()
 
     cfg = load_config(ROOT / args.config)
-    grid = ArenaGrid(cfg.target_width, cfg.target_height)
-    detector = HandCardDetector(grid, cfg.normalized_deck(), templates_dir=ROOT / cfg.templates_dir)
-    elixir_reader = ElixirReader(grid.cal)
 
     if args.image:
         frame = cv2.imread(args.image, cv2.IMREAD_COLOR)
         if frame is None:
             print(f"Error: could not read image '{args.image}'")
             return 1
-        frame = cv2.resize(frame, (cfg.target_width, cfg.target_height))
     else:
         adb = ADBController(
             adb_path=cfg.adb_path,
@@ -58,19 +61,26 @@ def main() -> int:
             print("Error: failed to grab frame from ADB.")
             return 1
 
+    # Card crops must use the calibrated tray geometry, exactly as the live bot does.
+    frame_h, frame_w = frame.shape[:2]
+    calibration = load_calibration(calibration_path(ROOT / cfg.calibration_dir, args.serial or cfg.adb_serial, frame_w, frame_h))
+    if calibration is None:
+        print("No saved calibration for this device/frame size; measuring one now...")
+        result = DeviceCalibrator().calibrate(frame)
+        calibration = result.calibration
+        print(f"  confidence {result.confidence:.2f} [{result.stage}]")
+        save_calibration(calibration_path(ROOT / cfg.calibration_dir, args.serial or cfg.adb_serial, frame_w, frame_h), calibration)
+        print("  (confirm the alignment with: python scripts/calibrate_device.py)")
+
+    grid = ArenaGrid(frame_w, frame_h, calibration)
+    detector = HandCardDetector(grid, cfg.normalized_deck(), templates_dir=ROOT / cfg.templates_dir)
+    elixir_reader = ElixirReader(grid.cal, grid=grid)
+
     out_dir = ROOT / cfg.templates_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Save annotated calibration overlay so user can visually verify alignment
-    preview = frame.copy()
-    ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
-    cv2.rectangle(preview, (ax1, ay1), (ax2, ay2), (0, 255, 120), 2)
-    for idx in range(4):
-        sx, sy = grid.hand_slot_pixel(idx)
-        cv2.rectangle(preview, (sx - 48, sy - 58), (sx + 48, sy + 58), (255, 200, 0), 2)
-        cv2.putText(
-            preview, f"Slot {idx}", (sx - 30, sy - 64), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 200, 0), 2
-        )
+    preview = render_calibration_preview(frame, calibration)
 
     preview_path = ROOT / "calibration_preview.png"
     cv2.imwrite(str(preview_path), preview)

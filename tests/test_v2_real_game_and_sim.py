@@ -56,8 +56,11 @@ def _hand(grid: ArenaGrid, names: list[str], elixir: float) -> list[HandSlot]:
     ]
 
 
-def test_raw_rgba_adb_screencap_decoder() -> None:
-    adb = ADBController(adb_path="adb", target_width=720, target_height=1280)
+def test_raw_rgba_screencap_decoder() -> None:
+    """The raw RGBA screencap decoder still works (now living in ScreencapSession)."""
+    from cr_bot.adb.adb_utils import Adb
+    from cr_bot.adb.scrcpy_multiclient import ScreencapSession
+
     w, h = 720, 1280
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     rgba[:, :, 0] = 200  # R
@@ -67,14 +70,13 @@ def test_raw_rgba_adb_screencap_decoder() -> None:
     header = w.to_bytes(4, "little") + h.to_bytes(4, "little") + (1).to_bytes(4, "little")
     payload = header + rgba.tobytes()
 
-    fake_proc = MagicMock()
-    fake_proc.stdout = payload
-    with patch.object(adb, "_run", return_value=fake_proc):
-        bgr = adb.capture_frame(prefer_raw=True)
-        assert bgr is not None
-        assert bgr.shape == (1280, 720, 3)
-        # OpenCV BGR order check: B=50, G=100, R=200
-        assert tuple(int(v) for v in bgr[100, 100]) == (50, 100, 200)
+    session = ScreencapSession(Adb("adb"), target_width=720)
+    with patch.object(session.adb, "exec_out", return_value=payload):
+        bgr = session._grab_raw()
+    assert bgr is not None
+    assert bgr.shape == (1280, 720, 3)
+    # OpenCV BGR order check: B=50, G=100, R=200
+    assert tuple(int(v) for v in bgr[100, 100]) == (50, 100, 200)
 
 
 def test_pending_tracker_prevents_double_commit_and_recovers_dropped_tap() -> None:

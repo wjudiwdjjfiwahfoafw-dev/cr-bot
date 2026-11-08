@@ -1,53 +1,41 @@
-"""Fast ADB controller for BlueStacks, LDPlayer, MEmu, MuMu, and Android devices."""
+"""
+ADB controller facade: scrcpy capture + low-latency touch injection for Clash Royale.
+
+This replaces the original implementation, which had two problems that together explain
+"screen capture works but cards never get placed":
+
+* **Capture** used ``adb exec-out screencap``. On a real phone that is a 150-400 ms round
+  trip, so the bot was always acting on a stale frame. It now streams over scrcpy through
+  :class:`~cr_bot.adb.scrcpy_multiclient.MultiClient` and always reads the newest frame.
+* **Input** used two ``input tap`` calls with a nominal 60 ms gap. Each ``input`` invocation
+  spawns a JVM on the device, and a zero-length tap is routinely dropped by the game. Cards
+  are now deployed with a real drag gesture, injected through the scrcpy control socket when
+  available (sub-10 ms, persistent connection, genuine press durations), with ``input swipe``
+  and ``input motionevent`` as fallbacks.
+
+Coordinates are handled in **frame space** and converted to device pixels exactly once, in
+:class:`~cr_bot.adb.touch.CoordMap`, so a downscaled capture stream can never shift taps.
+"""
 
 from __future__ import annotations
 
 import logging
-import os
-import random
-import re
-import shutil
-import subprocess
 import time
-from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
-import cv2
 import numpy as np
+
+from cr_bot.adb.adb_utils import Adb, ADBError, COMMON_ADB_PATHS, COMMON_EMULATOR_PORTS  # noqa: F401
+from cr_bot.adb.scrcpy_multiclient import MultiClient
+from cr_bot.adb.touch import CoordMap, DEFAULT_ORDER, GestureResult, TouchInjector
 
 logger = logging.getLogger(__name__)
 
-COMMON_ADB_PATHS = [
-    r"C:\Program Files\BlueStacks_nxt\HD-Adb.exe",
-    r"C:\Program Files (x86)\BlueStacks_nxt\HD-Adb.exe",
-    r"C:\LDPlayer\LDPlayer9\adb.exe",
-    r"C:\LDPlayer\LDPlayer4.0\adb.exe",
-    r"C:\Program Files\Microvirt\MEmu\adb.exe",
-    r"C:\Program Files\Netease\MuMuPlayerGlobal-12.0\shell\adb.exe",
-    os.path.expanduser("~/Library/Android/sdk/platform-tools/adb"),
-    os.path.expanduser("~/Android/Sdk/platform-tools/adb"),
-    "/usr/bin/adb",
-    "/usr/local/bin/adb",
-]
-
-COMMON_EMULATOR_PORTS = [
-    "127.0.0.1:5555",
-    "127.0.0.1:5556",
-    "127.0.0.1:5565",
-    "127.0.0.1:5554",
-    "127.0.0.1:21503",  # MEmu
-    "127.0.0.1:16384",  # MuMu 12
-    "127.0.0.1:7555",   # MuMu 6
-    "127.0.0.1:62001",  # Nox
-]
-
-
-class ADBError(RuntimeError):
-    """Raised when ADB communication or device discovery fails."""
+__all__ = ["ADBController", "ADBError", "COMMON_ADB_PATHS", "COMMON_EMULATOR_PORTS"]
 
 
 class ADBController:
-    """Handles low-latency screenshot streaming and humanized touch input over ADB."""
+    """Owns the ADB connection, the capture stream and the touch injector."""
 
     def __init__(
         self,
@@ -55,213 +43,205 @@ class ADBController:
         serial: Optional[str] = None,
         target_width: int = 720,
         target_height: int = 1280,
-        jitter_px: int = 4,
+        jitter_px: int = 2,
         dry_run: bool = False,
+        capture_backend: str = "auto",
+        input_backend: str = "auto",
+        deploy_style: str = "drag",
+        capture_bitrate: int = 12_000_000,
+        scrcpy_jar: Optional[str] = None,
+        capture_max_fps: int = 30,
+        keep_awake: bool = True,
+        lock_portrait: bool = True,
+        input_order: Sequence[str] = DEFAULT_ORDER,
     ) -> None:
-        self.adb_bin = self._resolve_adb_binary(adb_path)
+        self.adb_bin = adb_path
         self.serial = serial
-        self.target_width = target_width
-        self.target_height = target_height
-        self.device_width = target_width
-        self.device_height = target_height
-        self.jitter_px = jitter_px
-        self.dry_run = dry_run
-        self._rng = random.Random()
+        self.target_width = int(target_width)
+        self.target_height = int(target_height)
+        self.jitter_px = int(jitter_px)
+        self.dry_run = bool(dry_run)
+        self.capture_backend = capture_backend
+        self._input_backend_requested = input_backend
+        self.deploy_style = deploy_style
+        self.capture_bitrate = int(capture_bitrate)
+        self.scrcpy_jar = scrcpy_jar
+        self.capture_max_fps = int(capture_max_fps)
+        self.keep_awake = bool(keep_awake)
+        self.lock_portrait = bool(lock_portrait)
+        self.input_order = tuple(input_order)
 
-    @staticmethod
-    def _resolve_adb_binary(preferred: str) -> str:
-        found = shutil.which(preferred)
-        if found:
-            return found
-        if Path(preferred).is_file():
-            return str(Path(preferred))
-        for candidate in COMMON_ADB_PATHS:
-            if Path(candidate).is_file():
-                logger.info("Auto-detected emulator ADB binary at: %s", candidate)
-                return candidate
-        return preferred
+        self.adb: Optional[Adb] = None
+        self.client: Optional[MultiClient] = None
+        self.touch: Optional[TouchInjector] = None
+        self.coord: Optional[CoordMap] = None
+        self.device_size: Tuple[int, int] = (0, 0)
+        self.frame_size: Tuple[int, int] = (0, 0)
+        self.backend_name = "none"
+        self._last_frame: Optional[np.ndarray] = None
+        self._last_seq = -1
 
-    def _base_cmd(self) -> List[str]:
-        cmd = [self.adb_bin]
-        if self.serial:
-            cmd.extend(["-s", self.serial])
-        return cmd
-
-    def _run(self, args: List[str], timeout: float = 5.0) -> subprocess.CompletedProcess:
-        try:
-            return subprocess.run(
-                self._base_cmd() + args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=timeout,
-                check=False,
-            )
-        except FileNotFoundError as exc:
-            raise ADBError(
-                f"ADB executable '{self.adb_bin}' not found. Install Android Platform Tools or "
-                "enable ADB in BlueStacks/LDPlayer settings and set `adb.adb_path` in configs/mk_zap_bait.yaml."
-            ) from exc
-
-    def list_devices(self) -> List[str]:
-        res = subprocess.run(
-            [self.adb_bin, "devices"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=5.0,
-            check=False,
-        )
-        lines = res.stdout.decode("utf-8", errors="ignore").splitlines()
-        devices: List[str] = []
-        for line in lines[1:]:
-            parts = line.strip().split()
-            if len(parts) >= 2 and parts[1] == "device":
-                devices.append(parts[0])
-        return devices
-
+    # -- lifecycle -----------------------------------------------------------------
     def connect(self) -> str:
-        """Connect to the configured or auto-discovered Android emulator and query its screen size."""
-        if self.serial and ":" in self.serial:
-            subprocess.run(
-                [self.adb_bin, "connect", self.serial],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=4.0,
-                check=False,
+        self.adb = Adb(self.adb_bin, self.serial)
+        serial = self.adb.connect(self.serial)
+        self.serial = serial
+
+        if self.keep_awake:
+            self.adb.ensure_ready_for_play()
+        if self.lock_portrait:
+            self.adb.lock_portrait()
+
+        info = self.adb.display_info()
+        self.device_size = (info.width, info.height)
+        if info.width > info.height:
+            logger.warning(
+                "Device reports a landscape display (%dx%d). Clash Royale must be in portrait "
+                "for coordinate mapping to be valid.",
+                info.width,
+                info.height,
             )
 
-        devices = self.list_devices()
-        if not devices:
-            logger.info("No active ADB devices listed; probing common emulator ports...")
-            for host_port in COMMON_EMULATOR_PORTS:
-                subprocess.run(
-                    [self.adb_bin, "connect", host_port],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=2.0,
-                    check=False,
-                )
-                devices = self.list_devices()
-                if devices:
-                    break
-
-        if not devices:
-            raise ADBError(
-                "No Android emulator detected over ADB. Make sure BlueStacks/LDPlayer is open "
-                "with 'Android Debug Bridge (ADB)' enabled in Emulator Settings -> Advanced."
-            )
-
-        if not self.serial or self.serial not in devices:
-            self.serial = devices[0]
-
-        self._detect_device_resolution()
-        logger.info(
-            "Connected to emulator %s (physical=%dx%d -> normalized=%dx%d)",
-            self.serial,
-            self.device_width,
-            self.device_height,
-            self.target_width,
-            self.target_height,
+        self.client = MultiClient(
+            adb_path=self.adb_bin,
+            serial=serial,
+            target_width=self.target_width,
+            bitrate=self.capture_bitrate,
+            max_fps=self.capture_max_fps,
+            backend=self.capture_backend,
+            scrcpy_jar=self.scrcpy_jar,
         )
-        return self.serial
-
-    def _detect_device_resolution(self) -> None:
-        res = self._run(["shell", "wm", "size"], timeout=3.0)
-        text = res.stdout.decode("utf-8", errors="ignore")
-        matches = re.findall(r"(\d+)x(\d+)", text)
-        if matches:
-            # Prefer Override size if present (last match)
-            w, h = int(matches[-1][0]), int(matches[-1][1])
-            # Ensure portrait orientation assumption matches Clash Royale
-            if w > h:
-                w, h = h, w
-            self.device_width, self.device_height = w, h
-
-    def capture_frame(self, prefer_raw: bool = True) -> Optional[np.ndarray]:
-        """
-        Capture a BGR frame over ADB normalized to target resolution.
-        Tries zero-compression raw RGBA `screencap` first (~25ms vs ~70ms PNG), with automatic
-        fallback to `screencap -p` if the emulator uses a non-RGBA framebuffer format.
-        """
-        frame: Optional[np.ndarray] = None
-        if prefer_raw:
-            frame = self._capture_raw_rgba()
-        if frame is None:
-            frame = self._capture_png()
-        if frame is None:
-            return None
-
-        h, w = frame.shape[:2]
-        self.device_width, self.device_height = w, h
-        if (w, h) != (self.target_width, self.target_height):
-            frame = cv2.resize(
-                frame, (self.target_width, self.target_height), interpolation=cv2.INTER_AREA
+        self.client.start()
+        session = self.client.session()
+        self.backend_name = getattr(self.client, "backend_used", "") or type(session).__name__
+        if getattr(self.client, "fallback_reason", ""):
+            logger.warning(
+                "Capture downgraded to %s (live scrcpy unavailable). Deploy timing still works, "
+                "but reactions lag by one frame.", self.backend_name
             )
+
+        frame = session.latest_frame(timeout=5.0)
+        if frame is None:
+            raise ADBError("Capture started but produced no frames")
+        self.frame_size = (int(frame.shape[1]), int(frame.shape[0]))
+        self._last_frame = frame
+
+        self.coord = CoordMap(
+            frame_w=self.frame_size[0],
+            frame_h=self.frame_size[1],
+            device_w=self.device_size[0],
+            device_h=self.device_size[1],
+        )
+        self.touch = TouchInjector(
+            adb=self.adb,
+            coord=self.coord,
+            control=getattr(session, "control", None),
+            order=self.input_order,
+            deploy_style=self.deploy_style,
+            jitter_px=self.jitter_px,
+        )
+        if self._input_backend_requested not in ("auto", "default", None):
+            self.touch.set_active(self._input_backend_requested)
+
+        logger.info(
+            "Connected to %s | capture=%s %dx%d | device=%dx%d | %s",
+            serial,
+            self.backend_name,
+            self.frame_size[0],
+            self.frame_size[1],
+            self.device_size[0],
+            self.device_size[1],
+            self.touch.describe(),
+        )
+        return serial
+
+    def close(self) -> None:
+        if self.client is not None:
+            self.client.stop()
+            self.client = None
+
+    def __enter__(self) -> "ADBController":
+        self.connect()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    # -- capture -------------------------------------------------------------------
+    def capture_frame(self, min_seq: int = 0, timeout: float = 0.5) -> Optional[np.ndarray]:
+        """Newest frame from the live stream (no screencap round trip)."""
+        if self.client is None:
+            return None
+        frame = self.client.latest_frame(min_seq=min_seq, timeout=timeout)
+        if frame is not None:
+            if frame.shape[1] != self.frame_size[0] or frame.shape[0] != self.frame_size[1]:
+                self.frame_size = (int(frame.shape[1]), int(frame.shape[0]))
+                if self.coord is not None:
+                    self.coord.frame_w, self.coord.frame_h = self.frame_size
+            self._last_frame = frame
         return frame
 
-    def _capture_raw_rgba(self) -> Optional[np.ndarray]:
-        res = self._run(["exec-out", "screencap"], timeout=2.5)
-        raw = res.stdout
-        if not raw or len(raw) < 16:
+    @property
+    def frame_seq(self) -> int:
+        return 0 if self.client is None else self.client.frame_seq()
+
+    @property
+    def fps(self) -> float:
+        return 0.0 if self.client is None else self.client.fps
+
+    @property
+    def frame_age(self) -> float:
+        return float("inf") if self.client is None else self.client.frame_age
+
+    def wait_new_frame(self, last_seq: int, timeout: float = 0.4) -> Optional[np.ndarray]:
+        """Block until the stream advances past ``last_seq`` (or time out)."""
+        if self.client is None:
             return None
-        # Android raw screencap header: uint32 width, uint32 height, uint32 format (1 = RGBA_8888)
-        # Android 12+ may prepend an extra 4-byte colorSpace field (16-byte header)
-        w, h, fmt = int.from_bytes(raw[0:4], "little"), int.from_bytes(raw[4:8], "little"), int.from_bytes(raw[8:12], "little")
-        if fmt != 1 or w <= 0 or h <= 0 or w > 4096 or h > 4096:
-            return None
-        expected = w * h * 4
-        if len(raw) == expected + 12:
-            offset = 12
-        elif len(raw) == expected + 16:
-            offset = 16
-        else:
-            return None
-        rgba = np.frombuffer(raw, dtype=np.uint8, offset=offset).reshape((h, w, 4))
-        return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+        session = self.client.session()
+        waited = time.monotonic()
+        while time.monotonic() - waited < timeout:
+            if session.frame_seq > last_seq:
+                return session.latest_frame()
+            time.sleep(0.004)
+        return session.latest_frame()
 
-    def _capture_png(self) -> Optional[np.ndarray]:
-        res = self._run(["exec-out", "screencap", "-p"], timeout=3.0)
-        raw = res.stdout
-        if not raw or len(raw) < 100:
-            return None
-
-        # Handle rare older Windows ADB builds that convert LF -> CRLF
-        if raw[:8] != b"\x89PNG\r\n\x1a\n" and b"\x89PNG\r\r\n\x1a\r\n" in raw[:16]:
-            raw = raw.replace(b"\r\n", b"\n")
-
-        buf = np.frombuffer(raw, dtype=np.uint8)
-        return cv2.imdecode(buf, cv2.IMREAD_COLOR)
-
-    def _to_device_xy(self, norm_x: int, norm_y: int, apply_jitter: bool = True) -> Tuple[int, int]:
-        jx = int(round(self._rng.gauss(0, self.jitter_px * 0.5))) if apply_jitter else 0
-        jy = int(round(self._rng.gauss(0, self.jitter_px * 0.5))) if apply_jitter else 0
-        jx = max(-self.jitter_px, min(self.jitter_px, jx))
-        jy = max(-self.jitter_px, min(self.jitter_px, jy))
-
-        x = max(2, min(self.target_width - 2, norm_x + jx))
-        y = max(2, min(self.target_height - 2, norm_y + jy))
-
-        dev_x = int(round(x * (self.device_width / float(self.target_width))))
-        dev_y = int(round(y * (self.device_height / float(self.target_height))))
-        return dev_x, dev_y
-
-    def tap(self, x: int, y: int, apply_jitter: bool = True) -> None:
-        dev_x, dev_y = self._to_device_xy(x, y, apply_jitter=apply_jitter)
+    # -- input ---------------------------------------------------------------------
+    def tap(self, x: int, y: int, hold_ms: float = 70.0) -> GestureResult:
+        assert self.touch is not None, "connect() first"
         if self.dry_run:
-            logger.info("[DRY-RUN] tap(%d, %d)", dev_x, dev_y)
-            return
-        self._run(["shell", "input", "tap", str(dev_x), str(dev_y)], timeout=2.0)
+            logger.info("[DRY-RUN] tap(%d, %d)", x, y)
+            return GestureResult(ok=True, backend="dry-run", kind="tap", start=(x, y), end=(x, y))
+        return self.touch.tap_abs((x, y), hold_ms=hold_ms)
 
-    def deploy_card(self, slot_xy: Tuple[int, int], arena_xy: Tuple[int, int]) -> None:
-        """Select a hand card slot then tap the target arena coordinate with human-like timing."""
-        sx, sy = self._to_device_xy(slot_xy[0], slot_xy[1], apply_jitter=True)
-        ax, ay = self._to_device_xy(arena_xy[0], arena_xy[1], apply_jitter=True)
-
+    def deploy_card(
+        self,
+        slot_xy: Tuple[int, int],
+        arena_xy: Tuple[int, int],
+        style: Optional[str] = None,
+        force_backend: Optional[str] = None,
+    ) -> GestureResult:
+        """Drag the card at ``slot_xy`` onto ``arena_xy`` (frame-space pixels)."""
+        assert self.touch is not None, "connect() first"
         if self.dry_run:
-            logger.info("[DRY-RUN] deploy_card slot=(%d,%d) -> arena=(%d,%d)", sx, sy, ax, ay)
-            return
+            logger.info("[DRY-RUN] deploy slot=%s -> arena=%s", slot_xy, arena_xy)
+            return GestureResult(
+                ok=True, backend="dry-run", kind="drag", start=slot_xy, end=arena_xy
+            )
+        return self.touch.play_card(
+            slot_xy, arena_xy, style=style, force_backend=force_backend
+        )
 
-        # Single shell invocation avoids double ADB process spawn overhead (~60ms faster!)
-        delay_sec = round(self._rng.uniform(0.055, 0.088), 3)
-        shell_script = f"input tap {sx} {sy}; sleep {delay_sec}; input tap {ax} {ay}"
-        self._run(["shell", shell_script], timeout=2.5)
-        time.sleep(0.02)
+    def set_input_backend(self, name: str) -> bool:
+        return bool(self.touch and self.touch.set_active(name))
+
+    @property
+    def input_backend(self) -> str:
+        return self.touch.active if self.touch else "none"
+
+    # -- diagnostics ---------------------------------------------------------------
+    def status_line(self) -> str:
+        return (
+            f"{self.serial} | capture={self.backend_name} {self.frame_size[0]}x{self.frame_size[1]} "
+            f"@{self.fps:.1f}fps (age {self.frame_age * 1000:.0f}ms) | input={self.input_backend} | "
+            f"{self.touch.stats() if self.touch else 'no gestures'}"
+        )

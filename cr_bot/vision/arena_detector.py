@@ -6,7 +6,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -14,6 +14,18 @@ import numpy as np
 from cr_bot.arena.grid import ArenaGrid
 from cr_bot.config.cards_db import get_card_info, normalize_card_name
 from cr_bot.models import DetectedUnit, MoveType, Side, WeightClass
+from cr_bot.vision.unit_detector import (
+    BlobUnit,
+    BlobUnitDetector,
+    DetectorStats,
+    HealthBar,
+    HealthBarReader,
+    classify_size,
+    pixels_per_tile,
+)
+
+if TYPE_CHECKING:  # pragma: no cover
+    from cr_bot.vision.unit_identity import UnitIdentityMemory
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +60,8 @@ class YOLOBackend:
         wpath = Path(weights_path)
         if not wpath.is_file():
             logger.info(
-                "YOLO weights '%s' not found; running with built-in OpenCV Health-Bar + Velocity detector.",
+                "YOLO weights '%s' not found; using the built-in detector: background segmentation "
+                "+ real-game sprite matching + velocity tracking (no ML weights needed).",
                 wpath,
             )
             return
@@ -222,105 +235,144 @@ class YOLOBackend:
         )
 
 
-class OpenCVHealthBarBackend:
-    """Zero-weight OpenCV detector that finds red/blue unit health bars and classifies unit weight."""
+class ArenaUnitBackend:
+    """Segmentation-first troop detector for real devices (``cr_bot.vision.unit_detector``).
 
-    def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
-        ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
-        arena_roi = frame_bgr[ay1:ay2, ax1:ax2]
-        if arena_roi.size == 0:
-            return []
+    The old implementation looked for red/blue horizontal strips and guessed the unit type from
+    the strip's pixel width using 720p emulator constants.  This one segments moving objects out
+    of the static arena, which yields a real bounding box, a tile-space position, a tile-relative
+    size class, and a team side; health bars are then only used to refine side and HP.
 
-        hsv = cv2.cvtColor(arena_roi, cv2.COLOR_BGR2HSV)
+    Identity is optional: :class:`cr_bot.vision.unit_identity.UnitIdentityMemory` supplies card
+    names once the bot has seen enough of its own verified deploys.  Without it, detections keep
+    the size-based ``unknown_*`` label, which is exactly what the brain needs to pick a counter.
+    """
 
-        # Enemy red health bars
-        enemy_mask = cv2.inRange(hsv, np.array([0, 125, 120]), np.array([8, 255, 255])) | cv2.inRange(
-            hsv, np.array([170, 125, 120]), np.array([179, 255, 255])
-        )
-        # Ally blue/cyan health bars
-        ally_mask = cv2.inRange(hsv, np.array([94, 115, 125]), np.array([116, 255, 255]))
+    #: how far below a health bar the unit stands, in tiles (used before segmentation warms up)
+    BAR_TO_FOOT_TILES = 0.82
 
-        # Mask out the 6 fixed tower HP bar zones so static towers aren't reported as mobile units
-        for tw_name, (tx, ty) in grid.TOWER_TILES.items():
-            px, py = grid.tile_to_pixel(tx, ty)
-            lx, ly = px - ax1, py - ay1
-            cv2.rectangle(enemy_mask, (lx - 42, ly - 56), (lx + 42, ly + 28), 0, -1)
-            cv2.rectangle(ally_mask, (lx - 42, ly - 56), (lx + 42, ly + 28), 0, -1)
-
-        detections: List[RawDetection] = []
-        detections.extend(self._extract_bars(enemy_mask, Side.ENEMY, ax1, ay1, grid))
-        detections.extend(self._extract_bars(ally_mask, Side.ALLY, ax1, ay1, grid))
-        return detections
-
-    def _extract_bars(
+    def __init__(
         self,
-        mask: np.ndarray,
-        side: Side,
-        offset_x: int,
-        offset_y: int,
-        grid: ArenaGrid,
-    ) -> List[RawDetection]:
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 2))
-        connected = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        identity_memory: Optional["UnitIdentityMemory"] = None,
+        enable_segmentation: bool = True,
+        enable_identity: bool = True,
+    ) -> None:
+        self.segmenter = BlobUnitDetector()
+        self.bar_reader = HealthBarReader()
+        self.identity = identity_memory
+        self.enable_segmentation = enable_segmentation
+        self.enable_identity = enable_identity
+        self.last_bars: List[HealthBar] = []
+        self.stats = DetectorStats()
 
-        bars: List[Tuple[int, int, int, int]] = []
-        for cnt in contours:
-            bx, by, bw, bh = cv2.boundingRect(cnt)
-            # Health bars are thin horizontal strips (width >= 11px, height 2..11px, aspect >= 2.1)
-            if bw < 11 or bw > 95 or bh < 2 or bh > 12:
+    def reset(self) -> None:
+        self.segmenter.reset()
+        self.stats = DetectorStats()
+
+    # -- main entry ----------------------------------------------------------------
+    def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        units: List[BlobUnit] = []
+        if self.enable_segmentation:
+            units = self.segmenter.detect(frame_bgr, grid)
+            self.last_bars = self.segmenter.last_bars
+        if not units:
+            # Nothing moving was found: either the background model is still warming up or the
+            # arena is genuinely empty (a spell lands, an elixir bar animates). Bars cover both.
+            return self._detect_bars_only(frame_bgr, grid)
+        out = [self._describe(unit, frame_bgr, grid) for unit in units]
+        self._remember(out, frame_bgr, grid)
+        self.stats.add(units, bars=len(self.last_bars),
+                       identified=sum(1 for d in out if not d.name.startswith("unknown_")))
+        return out
+
+    def _describe(self, unit: BlobUnit, frame_bgr: np.ndarray, grid: ArenaGrid) -> RawDetection:
+        name = unit.fallback_label
+        move_type = MoveType.GROUND
+        weight = unit.weight_class
+        confidence = 0.55 + 0.25 * min(1.0, unit.side_confidence)
+        source = "segmentation"
+
+        if self.enable_identity and self.identity is not None and self.identity.sample_count:
+            patch = self._patch(frame_bgr, unit.bbox)
+            match = self.identity.match(patch)
+            if match is not None:
+                name = match.card
+                source = "segmentation+identity"
+                confidence = float(min(0.97, 0.55 + 0.45 * max(0.0, match.score)))
+                info = get_card_info(match.card)
+                if info is not None:
+                    move_type = info.move_type
+                    if info.weight_class not in (WeightClass.SPELL_PROJECTILE, WeightClass.BUILDING):
+                        weight = info.weight_class
+
+        return RawDetection(
+            name=name,
+            side=unit.side,
+            tile_x=unit.tile_x,
+            tile_y=unit.tile_y,
+            pixel_bbox=unit.bbox,
+            confidence=round(confidence, 2),
+            hp_ratio=round(float(unit.hp_ratio), 2),
+            move_type=move_type,
+            weight_class=weight,
+            source=source,
+        )
+
+    @staticmethod
+    def _patch(frame_bgr: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
+        x1, y1, x2, y2 = bbox
+        x1, y1 = max(0, x1), max(0, y1)
+        x2 = min(frame_bgr.shape[1], x2)
+        y2 = min(frame_bgr.shape[0], y2)
+        return frame_bgr[y1:y2, x1:x2]
+
+    def _remember(self, detections: List[RawDetection], frame_bgr: np.ndarray, grid: ArenaGrid) -> None:
+        """Learn confirmed identities: a named detection strengthens its own reference set."""
+        if self.identity is None or not self.enable_identity:
+            return
+        for det in detections:
+            if det.name.startswith("unknown_") or det.confidence < 0.7:
                 continue
-            if (bw / float(max(1, bh))) < 2.1:
+            self.identity.add_from_frame(det.name, frame_bgr, det.pixel_bbox)
+
+    # -- fallback while the background model warms up ------------------------------
+    def _detect_bars_only(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        ppt = pixels_per_tile(grid)
+        bars = self.segmenter.last_bars or self.bar_reader.read(frame_bgr, grid, ppt)
+        self.last_bars = bars
+        out: List[RawDetection] = []
+        foot_offset = self.BAR_TO_FOOT_TILES * ppt
+        for bar in bars:
+            x1, _y1, x2, y2 = bar.bbox
+            cx = 0.5 * (x1 + x2)
+            foot_y = y2 + foot_offset
+            tx, ty = grid.pixel_to_tile(cx, foot_y)
+            if not (0.0 <= tx <= grid.TILES_X and 0.0 <= ty <= grid.TILES_Y):
                 continue
-            bars.append((bx + offset_x, by + offset_y, bw, bh))
-
-        results: List[RawDetection] = []
-        for px, py, bw, bh in bars:
-            # Troop feet sit roughly 22..32 px below its floating health bar
-            foot_x = px + 0.5 * bw
-            foot_y = py + 26.0
-            tx, ty = grid.pixel_to_tile(foot_x, foot_y)
-
-            # Estimate weight class from health bar pixel span on 720p width
-            if bw >= 48:
-                w_cls = WeightClass.HEAVY_TANK
-                label = "unknown_tank"
-                hp_est = min(1.0, bw / 62.0)
-            elif bw >= 28:
-                w_cls = WeightClass.MEDIUM
-                label = "unknown_medium"
-                hp_est = min(1.0, bw / 38.0)
-            elif bw >= 18:
-                w_cls = WeightClass.LIGHT
-                label = "unknown_light"
-                hp_est = min(1.0, bw / 24.0)
-            else:
-                w_cls = WeightClass.SWARM
-                label = "unknown_swarm"
-                hp_est = 1.0
-
-            bbox = (px - 8, py, px + bw + 8, int(py + 38))
-            results.append(
+            # a real device draws unit bars between ~0.2 and ~2.8 tiles wide
+            width_tiles = bar.total_width / ppt
+            weight, label = classify_size(max(0.5, width_tiles * 1.6))
+            out.append(
                 RawDetection(
                     name=label,
-                    side=side,
-                    tile_x=tx,
-                    tile_y=ty,
-                    pixel_bbox=bbox,
-                    confidence=0.65,
-                    hp_ratio=round(hp_est, 2),
+                    side=bar.side,
+                    tile_x=float(tx),
+                    tile_y=float(ty),
+                    pixel_bbox=(int(x1 - 0.5 * ppt), int(y2), int(x2 + 0.5 * ppt), int(foot_y)),
+                    confidence=0.5,
+                    hp_ratio=round(float(bar.hp_ratio), 2),
                     move_type=MoveType.GROUND,
-                    weight_class=w_cls,
-                    source="opencv",
+                    weight_class=weight,
+                    source="bars",
                 )
             )
-        return results
+        return out
 
     @staticmethod
     def infer_side_around_bbox(frame_bgr: np.ndarray, bbox: Tuple[int, int, int, int]) -> Side:
         h, w = frame_bgr.shape[:2]
         x1, y1, x2, _ = bbox
-        head = frame_bgr[max(0, y1 - 18) : min(h, y1 + 14), max(0, x1 - 6) : min(w, x2 + 6)]
+        head = frame_bgr[max(0, y1 - 18): min(h, y1 + 14), max(0, x1 - 6): min(w, x2 + 6)]
         if head.size == 0:
             return Side.ENEMY
         hsv = cv2.cvtColor(head, cv2.COLOR_BGR2HSV)
@@ -329,6 +381,10 @@ class OpenCVHealthBarBackend:
         )
         blue = cv2.inRange(hsv, np.array([92, 100, 110]), np.array([118, 255, 255]))
         return Side.ALLY if np.count_nonzero(blue) > np.count_nonzero(red) else Side.ENEMY
+
+
+#: kept for backwards compatibility with older scripts/configs
+OpenCVHealthBarBackend = ArenaUnitBackend
 
 
 class HybridArenaDetector:
@@ -343,16 +399,24 @@ class HybridArenaDetector:
         yolo_weights_path: Optional[str] = None,
         yolo_conf: float = 0.42,
         enable_opencv_fallback: bool = True,
+        identity_memory: Optional["UnitIdentityMemory"] = None,
+        enable_segmentation: bool = True,
     ) -> None:
         self.grid = grid
         self.yolo = YOLOBackend(yolo_weights_path, conf_threshold=yolo_conf)
-        self.cv_fallback = OpenCVHealthBarBackend() if enable_opencv_fallback else None
+        self.cv_fallback = (
+            ArenaUnitBackend(identity_memory=identity_memory, enable_segmentation=enable_segmentation)
+            if enable_opencv_fallback
+            else None
+        )
         self._tracks: Dict[int, DetectedUnit] = {}
         self._next_track_id: int = 1
 
     def reset(self) -> None:
         self._tracks.clear()
         self._next_track_id = 1
+        if self.cv_fallback is not None:
+            self.cv_fallback.reset()
 
     def detect_and_track(self, frame_bgr: np.ndarray, now_ts: float) -> List[DetectedUnit]:
         yolo_dets = self.yolo.detect(frame_bgr, self.grid) if self.yolo.is_active else []

@@ -1,12 +1,25 @@
-# Core runtime (required)
+# --- Core runtime (required) -----------------------------------------------------------
 opencv-python>=4.8.0
 numpy>=1.24.0
 PyYAML>=6.0
 Pillow>=10.0.0
 
-# Hybrid ML detection (optional - bot automatically falls back to OpenCV if not installed or no weights provided)
-ultralytics>=8.1.0
-onnxruntime>=1.17.0
+# --- Live device capture (required for real-device play) --------------------------------
+# PyAV decodes the H.264 stream that the scrcpy server produces. It ships prebuilt wheels
+# for all current Python versions.
+av>=10.0.0
 
-# Development & testing
+# adbutils is only needed if you choose the `scrcpy_py` capture backend (which wraps the
+# py-scrcpy-client package). The default `scrcpy` backend speaks the protocol directly and
+# needs nothing beyond `av` + the adb binary.
+# adbutils>=2.0.0
+# scrcpy-client==0.4.1   # install with: pip install --no-deps scrcpy-client==0.4.1
+#                        # (its own pins require av<10 / adbutils<0.15, which no longer build)
+
+# --- Optional ML detection --------------------------------------------------------------
+# The bot falls back to a pure-OpenCV detector if these are absent or no weights exist.
+# ultralytics>=8.1.0
+# onnxruntime>=1.17.0
+
+# --- Development & testing --------------------------------------------------------------
 pytest>=7.4.0

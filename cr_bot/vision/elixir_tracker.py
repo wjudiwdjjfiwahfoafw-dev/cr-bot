@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Deque, List, Set
+from typing import Deque, List, Set, Tuple
 
 import cv2
 import numpy as np
@@ -14,55 +14,76 @@ from cr_bot.models import DetectedUnit, GamePhase, OpponentCycleState, Side
 
 
 class ElixirReader:
-    """Reads player elixir (0.0 to 10.0) from the 10-pip purple elixir bar at the bottom of the screen."""
+    """Reads player elixir (0.0 to 10.0) from the purple elixir bar at the bottom of the screen.
 
-    def __init__(self, calibration: ArenaCalibration | None = None) -> None:
+    Uses a *continuous* fill measurement rather than ten discrete pips. Per-pip thresholds
+    break as soon as the bar geometry is a few percent off, which is guaranteed on a real
+    device whose capture is downscaled and whose HUD is not at the emulator's aspect ratio;
+    measuring where the magenta fill ends and dividing by the measured bar width degrades
+    gracefully instead.
+    """
+
+    def __init__(self, calibration: ArenaCalibration | None = None, grid=None) -> None:
         self.cal = calibration or ArenaCalibration()
-        self._history: Deque[float] = deque(maxlen=3)
+        self.grid = grid
+        self._history: Deque[float] = deque(maxlen=5)
+        self.last_fill_ratio: float = 0.0
+        self.last_confidence: float = 0.0
 
     def reset(self) -> None:
         self._history.clear()
 
-    def read_elixir(self, frame_bgr: np.ndarray) -> float:
+    def _geometry(self, frame_bgr: np.ndarray) -> Tuple[int, int, int, int, int]:
         h, w = frame_bgr.shape[:2]
-        x_start = int(round(self.cal.elixir_x_start_ratio * w))
-        x_end = int(round(self.cal.elixir_x_end_ratio * w))
-        y_center = int(round(self.cal.elixir_y_ratio * h))
+        if self.grid is not None:
+            self.grid.resize(w, h)
+            x1, x2, y = self.grid.elixir_geometry()
+        else:
+            x1 = int(round(self.cal.elixir_x_start_ratio * w))
+            x2 = int(round(self.cal.elixir_x_end_ratio * w))
+            y = int(round(self.cal.elixir_y_ratio * h))
+        bar_h = max(6, int(round(h * 0.012)))
+        return x1, x2, y - bar_h // 2, bar_h, y
 
-        y1 = max(0, y_center - 4)
-        y2 = min(h, y_center + 5)
-        strip = frame_bgr[y1:y2, x_start:x_end]
+    def read_elixir(self, frame_bgr: np.ndarray) -> float:
+        if frame_bgr is None:
+            return 0.0
+        h, w = frame_bgr.shape[:2]
+        x1, x2, y1, bar_h, _y = self._geometry(frame_bgr)
+        x1 = max(0, min(w - 2, x1))
+        x2 = max(x1 + 8, min(w, x2))
+        y1 = max(0, min(h - 2, y1))
+        y2 = min(h, y1 + bar_h)
+        strip = frame_bgr[y1:y2, x1:x2]
         if strip.size == 0:
             return 0.0
 
         hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
-        # Clash Royale elixir magenta/purple glow: OpenCV Hue ~ 132..172, high Saturation & Value
-        mask = cv2.inRange(hsv, np.array([128, 85, 105]), np.array([174, 255, 255]))
+        mask = cv2.inRange(hsv, np.array([128, 80, 100]), np.array([176, 255, 255]))
+        coverage = (mask > 0).mean(axis=0)  # per-column fill fraction
 
-        total_w = max(10, x_end - x_start)
-        seg_w = total_w / 10.0
-        elixir_val = 0.0
+        width = float(max(1, coverage.size))
+        # Bridge occlusion by the "Max: 10" label and the drop icon, then take the rightmost
+        # column that is still lit. Interior gaps must not truncate the reading.
+        smoothed = np.convolve(coverage, np.ones(9) / 9.0, mode="same")
+        lit = np.where(smoothed >= 0.28)[0]
+        if lit.size == 0:
+            self._history.append(0.0)
+            self.last_fill_ratio = 0.0
+            return 0.0
 
-        for seg_idx in range(10):
-            sx1 = int(round(seg_idx * seg_w)) + 2
-            sx2 = int(round((seg_idx + 1) * seg_w)) - 2
-            if sx2 <= sx1:
-                continue
-            seg_mask = mask[:, sx1:sx2]
-            fill_ratio = float(np.count_nonzero(seg_mask)) / float(seg_mask.size)
-            if fill_ratio >= 0.52:
-                elixir_val = float(seg_idx + 1)
-            elif fill_ratio >= 0.18 and elixir_val == float(seg_idx):
-                # Partial pip currently charging
-                elixir_val = float(seg_idx) + min(0.9, fill_ratio / 0.55)
-                break
-            else:
-                break
+        last = int(lit.max()) + 1
+        ratio = max(0.0, min(1.0, (last + width * 0.012) / width))
+        value = ratio * 10.0
 
-        self._history.append(round(min(10.0, max(0.0, elixir_val)), 2))
-        # Temporal median filter prevents 1-frame particle flashes from spiking elixir readings
-        sorted_hist = sorted(self._history)
-        return sorted_hist[len(sorted_hist) // 2]
+        self.last_fill_ratio = ratio
+        self.last_confidence = 1.0 if 0.02 < ratio < 0.995 else 0.6
+
+        # Elixir never decreases except when we spend, so a median filter over recent frames
+        # removes particle/ability flashes without lagging real gains.
+        self._history.append(round(min(10.0, max(0.0, value)), 2))
+        ordered = sorted(self._history)
+        return ordered[len(ordered) // 2]
 
 
 class OpponentTracker:

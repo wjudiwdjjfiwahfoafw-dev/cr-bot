@@ -1,0 +1,665 @@
+{
+ "archers": {
+  "dir": "chr_archer_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "baby_dragon": {
+  "dir": "chr_baby_dragon_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "balloon": {
+  "dir": "chr_balloon_out",
+  "frames": [
+   "f00.png",
+   "f01.png"
+  ]
+ },
+ "bandit": {
+  "dir": "chr_bandit_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "barbarian_barrel": {
+  "dir": "chr_barbarian_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "barbarians": {
+  "dir": "chr_barbarian_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "bats": {
+  "dir": "chr_bats_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "battle_ram": {
+  "dir": "chr_battle_ram_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "bomb_tower": {
+  "dir": "building_bomb_tower_out",
+  "frames": [
+   "f00.png"
+  ]
+ },
+ "bomber": {
+  "dir": "chr_bomber_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "bowler": {
+  "dir": "chr_bowler_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "cannon": {
+  "dir": "building_basic_cannon_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "dark_prince": {
+  "dir": "chr_black_knight_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "dart_goblin": {
+  "dir": "chr_goblin_blowdart_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "electro_wizard": {
+  "dir": "chr_electro_wizard_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "executioner": {
+  "dir": "chr_axe_man_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "fire_spirit": {
+  "dir": "chr_fire_firespirit_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "firecracker": {
+  "dir": "chr_goblin_archer_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "giant": {
+  "dir": "chr_giant_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "giant_skeleton": {
+  "dir": "chr_giant_skeleton_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "goblin_gang": {
+  "dir": "chr_goblin_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "goblin_hut": {
+  "dir": "building_goblin_hut_out",
+  "frames": [
+   "f00.png"
+  ]
+ },
+ "goblins": {
+  "dir": "chr_goblin_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "golem": {
+  "dir": "chr_golem_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "guards": {
+  "dir": "chr_skeleton_warrior_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "hog_rider": {
+  "dir": "chr_hog_rider_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "ice_spirit": {
+  "dir": "chr_ice_spirits_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "ice_wizard": {
+  "dir": "chr_ice_wizard_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "knight": {
+  "dir": "chr_knight_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "lava_hound": {
+  "dir": "chr_lava_hound_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "lumberjack": {
+  "dir": "chr_rage_barbarian_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "mega_knight": {
+  "dir": "chr_mega_knight_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "mega_minion": {
+  "dir": "chr_mega_minion_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "miner": {
+  "dir": "chr_miner_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "mini_pekka": {
+  "dir": "chr_mini_pekka_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "minion_horde": {
+  "dir": "chr_minion_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "minions": {
+  "dir": "chr_minion_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "mortar": {
+  "dir": "building_mortar_out",
+  "frames": [
+   "f00.png",
+   "f01.png"
+  ]
+ },
+ "musketeer": {
+  "dir": "chr_musketeer_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "pekka": {
+  "dir": "chr_pekka_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "prince": {
+  "dir": "chr_prince_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "princess": {
+  "dir": "chr_princess_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "royal_giant": {
+  "dir": "chr_royal_giant_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "royal_hogs": {
+  "dir": "chr_hog_rider_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "skeleton_army": {
+  "dir": "chr_skeleton_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "skeletons": {
+  "dir": "chr_skeleton_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "sparky": {
+  "dir": "chr_zap_machine_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "tesla": {
+  "dir": "building_tesla_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "tombstone": {
+  "dir": "building_tombstone_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "valkyrie": {
+  "dir": "chr_valkyrie_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "witch": {
+  "dir": "chr_witch_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "wizard": {
+  "dir": "chr_wizard_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ },
+ "x_bow": {
+  "dir": "building_xbow_out",
+  "frames": [
+   "f00.png",
+   "f01.png",
+   "f02.png",
+   "f03.png",
+   "f04.png",
+   "f05.png",
+   "f06.png",
+   "f07.png"
+  ]
+ }
+}

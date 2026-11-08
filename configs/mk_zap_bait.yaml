@@ -1,5 +1,8 @@
 # Clash Royale Tactical Bot Configuration
 # Tailored for Mega Knight + Miner + Skeleton Barrel Zap Bait (3.3 Avg Elixir)
+#
+# Tuned for real Android hardware over ADB. Everything below the "deck" section is
+# about making the bot see and touch the game correctly on YOUR device.
 
 deck:
   - mega_knight       # 7 elixir - Defensive stomp & counterpush tank (never cycle dry in 1x!)
@@ -16,26 +19,73 @@ evolutions:
   - mega_knight
   - bats
 
-loop_hz: 12.0
+loop_hz: 15.0
 auto_queue_battle: false   # Set true to automatically click Battle & OK between matches
 
 adb:
   adb_path: "adb"
-  serial: null             # Auto-discovers BlueStacks (5555+), LDPlayer, MEmu, MuMu if null
-  target_width: 720
-  target_height: 1280
-  human_jitter_px: 4       # Subtle Gaussian pixel randomization on taps
+  serial: null             # Auto-discovers USB devices and BlueStacks/LDPlayer/MEmu/MuMu
+  target_height: 1280      # Only used as a fallback; real geometry comes from calibration
+  human_jitter_px: 2       # Subtle Gaussian pixel randomization on touches
+  keep_screen_on: true     # Wakes the device and keeps the display awake
+  lock_portrait: true      # Pins natural (portrait) orientation so touch maths stays valid
+  latency_sec: 0.10        # Round-trip latency the brain compensates for
+
+# ---------------------------------------------------------------------------------------
+# Capture: a live scrcpy stream instead of `adb exec-out screencap`.
+# `screencap` costs 150-400 ms per frame on a real phone, which makes the bot permanently
+# react to stale information. The scrcpy stream costs ~2-30 ms and is always current.
+# ---------------------------------------------------------------------------------------
+capture:
+  backend: "auto"          # auto | scrcpy | scrcpy_py | screencap
+  width: 720               # Streamed width; 720 is plenty for vision and much faster
+  bitrate: 12000000
+  max_fps: 30
+
+# ---------------------------------------------------------------------------------------
+# Input: how a card actually gets placed.
+# `drag` performs the game's native gesture (press card -> glide -> release) rather than
+# two zero-duration taps, which the game frequently ignores.
+# ---------------------------------------------------------------------------------------
+input:
+  backend: "auto"          # auto -> scrcpy control socket first, then adb fallbacks
+  chain: ["scrcpy", "swipe", "motionevent", "tap"]
+  deploy_style: "drag"     # drag | tap
+  verify_threshold: 9.0    # Pixel-diff (0-255) that counts as "the card left the hand"
+
+# ---------------------------------------------------------------------------------------
+# Calibration: measured once per device, then reused.
+# The bot auto-detects river / hand cards / elixir bar / towers and saves the result here.
+# Check configs/calibration/<device>.preview.png to confirm the grid lines up, or run
+#   python scripts/calibrate_device.py --manual
+# to click the four Princess Towers yourself (exact, ~10 seconds).
+# ---------------------------------------------------------------------------------------
+calibration:
+  dir: "configs/calibration"
+
+# Which builds of the game count as "the game". Custom APKs / private servers (Nulls Royale,
+# modded clients) are the same game with a different application id - list them here, or pass
+# `--package <id>` on the command line. `package_hints` match any substring of the id, so a
+# re-signed build is picked up without knowing its exact name.
+game:
+  packages:
+    - "com.supercell.clashroyale"     # stock app
+    - "nullsroyale.rel.free"          # Nulls Royale
+  package_hints:
+    - "clashroyale"
+    - "clash_royale"
+    - "nullsroyale"
 
 vision:
   templates_dir: "assets/card_templates"
-  yolo_weights_path: "weights/clash_yolov8n.onnx"   # Supports .onnx or Ultralytics .pt; auto-falls back to OpenCV if absent
+  yolo_weights_path: "weights/clash_yolov8n.onnx"   # Optional; auto-falls back to OpenCV
   yolo_confidence: 0.42
-  enable_opencv_fallback: true                      # Tracks enemy health bars, velocity & clusters even without YOLO weights
+  enable_opencv_fallback: true
 
 tactics:
   tower_level: 11
   min_action_cooldown_sec: 0.65
-  mk_min_stomp_elixir_value: 4.0   # Minimum ground cluster threat required before committing Mega Knight stomp
+  mk_min_stomp_elixir_value: 4.0   # Minimum ground cluster threat before committing Mega Knight
   leak_prevention_elixir: 9.3      # Proactive cycle/chip threshold so we never leak elixir
-  bait_window_seconds: 11.0        # Aggressive swarm/barrel window after opponent spends Log/Zap/Arrows
-  overtime_spell_finish_hp: 380    # Aggressive Miner + Zap finish threshold on low-HP Princess Towers
+  bait_window_seconds: 11.0        # Aggressive swarm/barrel window after opponent spends Log/Zap
+  overtime_spell_finish_hp: 380    # Aggressive Miner + Zap finish threshold on low-HP towers

@@ -1,4 +1,19 @@
-"""4-slot Hand Card recognizer using multi-cue template + HSV matching and unique deck assignment."""
+"""
+4-slot hand card recognizer.
+
+Real-device notes
+-----------------
+Two things made the original recognizer unreliable outside an emulator:
+
+1. It cropped each slot with hard-coded fractions of a 720x1280 frame. On a real phone the
+   tray sits elsewhere and is a different size, so crops were misaligned and every match was
+   noise. Crops now come from the calibrated grid (see ``cr_bot.arena.device_calibrator``).
+2. It matched a card template against a *same-size* crop with ``TM_CCOEFF_NORMED``, which for
+   equal-size images degenerates into a weak statistic. Comparison now uses a proper
+   normalised cross-correlation plus an HSV histogram correlation, and adds a **deck
+   elimination pass**: because the four hand cards are always four *distinct* cards drawn
+   from the eight-card deck, a single unrecognised slot can be filled in by elimination.
+"""
 
 from __future__ import annotations
 
@@ -15,12 +30,17 @@ from cr_bot.models import HandSlot
 
 logger = logging.getLogger(__name__)
 
+CardDescriptor = Tuple[np.ndarray, np.ndarray]
+
 
 class HandCardDetector:
     """Identifies the 4 playable cards in hand, affordability, and active Evolution glow."""
 
-    SLOT_CROP_W_RATIO = 96.0 / 720.0
-    SLOT_CROP_H_RATIO = 116.0 / 1280.0
+    MATCH_ACCEPT = 0.34
+    #: a slot may still be resolved below MATCH_ACCEPT when it is the only one left, because the
+    #: hand is guaranteed to be four distinct cards drawn from the eight-card deck
+    ELIMINATION_FLOOR = 0.16
+    EVO_GLOW_ROI_SCALE = 0.12
 
     def __init__(
         self,
@@ -31,11 +51,12 @@ class HandCardDetector:
         self.grid = grid
         self.deck_cards = [normalize_card_name(c) for c in deck_cards]
         self.templates_dir = Path(templates_dir)
-        self._templates: Dict[str, List[Tuple[np.ndarray, np.ndarray]]] = {}
+        self._templates: Dict[str, List[CardDescriptor]] = {}
         self.reload_templates()
 
+    # -- templates -----------------------------------------------------------------
     def reload_templates(self) -> int:
-        """Load `<card_name>*.png` templates from disk and precompute HSV histograms."""
+        """Load `<card_name>*.png` templates from disk and precompute descriptors."""
         self._templates.clear()
         if not self.templates_dir.exists():
             return 0
@@ -43,7 +64,6 @@ class HandCardDetector:
         loaded = 0
         for img_path in sorted(self.templates_dir.glob("*.png")):
             stem = img_path.stem.lower()
-            # Strip trailing numeric/evo variant suffixes like `mega_knight_evo` or `bats_1`
             matched_card = None
             for deck_card in self.deck_cards:
                 if stem == deck_card or stem.startswith(deck_card + "_"):
@@ -55,85 +75,119 @@ class HandCardDetector:
             img = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
             if img is None:
                 continue
-
-            norm_img, hist = self._prepare_descriptor(img)
-            self._templates.setdefault(matched_card, []).append((norm_img, hist))
+            self._templates.setdefault(matched_card, []).append(self._prepare_descriptor(img))
             loaded += 1
 
         if loaded:
             logger.info("Loaded %d card template(s) across %d unique cards.", loaded, len(self._templates))
         return loaded
 
+    @property
+    def has_templates(self) -> bool:
+        return bool(self._templates)
+
+    # -- cropping ------------------------------------------------------------------
     def crop_slot(self, frame_bgr: np.ndarray, slot_index: int) -> np.ndarray:
-        """Extract the portrait crop of hand slot 0..3."""
+        """Extract the portrait crop of hand slot 0..3 using calibrated geometry."""
         h, w = frame_bgr.shape[:2]
-        cx, cy = self.grid.hand_slot_pixel(slot_index)
-        half_w = int(round(0.5 * self.SLOT_CROP_W_RATIO * w))
-        half_h = int(round(0.5 * self.SLOT_CROP_H_RATIO * h))
-        x1, x2 = max(0, cx - half_w), min(w, cx + half_w)
-        y1, y2 = max(0, cy - half_h), min(h, cy + half_h)
+        self.grid.resize(w, h)
+        x1, y1, x2, y2 = self.grid.hand_slot_rect(slot_index)
         return frame_bgr[y1:y2, x1:x2]
 
+    @staticmethod
+    def _prepare_descriptor(crop_bgr: np.ndarray) -> CardDescriptor:
+        """Normalised, illumination-tolerant descriptor of a card portrait."""
+        if crop_bgr.size == 0:
+            raise ValueError("empty crop")
+        h, w = crop_bgr.shape[:2]
+        # Trim the elixir badge at the bottom and the level/element strip at the top, which
+        # vary with level and Evolution state but say nothing about card identity.
+        inner = crop_bgr[int(0.06 * h) : int(0.86 * h), int(0.06 * w) : int(0.94 * w)]
+        if inner.size == 0:
+            inner = crop_bgr
+        resized = cv2.resize(inner, (72, 80), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        gray = cv2.equalizeHist(gray).astype(np.float32)
+        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [30, 24], [0, 180, 0, 256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+        return gray, hist
+
+    @staticmethod
+    def _similarity(a: CardDescriptor, b: CardDescriptor) -> float:
+        ga, ha = a
+        gb, hb = b
+        if ga.shape != gb.shape:
+            gb = cv2.resize(gb, (ga.shape[1], ga.shape[0]))
+        va = ga.ravel() - float(ga.mean())
+        vb = gb.ravel() - float(gb.mean())
+        denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
+        ncc = float(np.dot(va, vb) / denom) if denom > 1e-6 else 0.0
+        hist_corr = float(cv2.compareHist(ha, hb, cv2.HISTCMP_CORREL))
+        return 0.68 * max(0.0, ncc) + 0.32 * max(0.0, hist_corr)
+
+    def _best_score(self, desc: CardDescriptor, card: str) -> float:
+        variants = self._templates.get(card)
+        if not variants:
+            return 0.0
+        return float(max(self._similarity(desc, v) for v in variants))
+
+    # -- detection -----------------------------------------------------------------
     def detect_hand(self, frame_bgr: np.ndarray, current_elixir: float) -> List[HandSlot]:
         """Classify all 4 hand slots with 1-to-1 uniqueness across the 8-card deck."""
-        slot_crops = [self.crop_slot(frame_bgr, i) for i in range(4)]
+        crops = [self.crop_slot(frame_bgr, i) for i in range(4)]
 
         if not self._templates:
-            # Graceful fallback when user hasn't run `scripts/capture_templates.py` yet:
-            # still detects Evolution diamonds & saturation readiness so calibration/HUD works!
-            fallback_hand: List[HandSlot] = []
-            for idx in range(4):
-                tap_xy = self.grid.hand_slot_pixel(idx)
-                crop = slot_crops[idx]
-                fallback_hand.append(
-                    HandSlot(
-                        slot_index=idx,
-                        card_name="unknown",
-                        elixir_cost=3,
-                        is_ready=self._is_slot_saturated(crop),
-                        is_evolved=self._has_evo_glow(frame_bgr, idx),
-                        confidence=0.0,
-                        tap_xy=tap_xy,
-                    )
-                )
-            return fallback_hand
+            return self._fallback_hand(frame_bgr, crops, current_elixir)
 
-        # Score every (slot_idx, card_name) pair
-        candidate_pairs: List[Tuple[float, int, str]] = []
-        for idx, crop in enumerate(slot_crops):
-            if crop.size == 0:
-                continue
-            slot_img, slot_hist = self._prepare_descriptor(crop)
-            for card_name, variants in self._templates.items():
-                best_score = -1.0
-                for tmpl_img, tmpl_hist in variants:
-                    ncc = float(cv2.matchTemplate(slot_img, tmpl_img, cv2.TM_CCOEFF_NORMED)[0, 0])
-                    hist_corr = float(cv2.compareHist(slot_hist, tmpl_hist, cv2.HISTCMP_CORREL))
-                    combined = 0.70 * ncc + 0.30 * max(0.0, hist_corr)
-                    if combined > best_score:
-                        best_score = combined
-                candidate_pairs.append((best_score, idx, card_name))
+        assigned: Dict[int, Tuple[str, float]] = {}
+        if all(c.size > 0 for c in crops):
+            pairs: List[Tuple[float, int, str]] = []
+            descriptors = [self._prepare_descriptor(c) for c in crops]
+            # The tray can only ever show cards from the deck: restricting the candidate pool to
+            # the deck removes most confusions with look-alike cards that can never appear here.
+            deck_pool = [c for c in self.deck_cards if c in self._templates]
+            pool = deck_pool if len(deck_pool) >= 4 else list(self._templates)
+            for idx, desc in enumerate(descriptors):
+                for card_name in pool:
+                    variants = self._templates[card_name]
+                    best = max(self._similarity(desc, v) for v in variants)
+                    pairs.append((best, idx, card_name))
 
-        # Greedy maximum-weight bipartite assignment ensures no duplicate card in hand
-        candidate_pairs.sort(key=lambda item: item[0], reverse=True)
-        assigned_slots: Dict[int, Tuple[str, float]] = {}
-        used_cards = set()
-
-        for score, slot_idx, card_name in candidate_pairs:
-            if slot_idx in assigned_slots or card_name in used_cards:
-                continue
-            if score >= 0.32:
-                assigned_slots[slot_idx] = (card_name, round(score, 3))
+            pairs.sort(key=lambda p: p[0], reverse=True)
+            used_cards = set()
+            for score, slot_idx, card_name in pairs:
+                if slot_idx in assigned or card_name in used_cards:
+                    continue
+                if score < self.MATCH_ACCEPT:
+                    continue
+                assigned[slot_idx] = (card_name, round(score, 3))
                 used_cards.add(card_name)
-            if len(assigned_slots) == 4:
-                break
+                if len(assigned) == 4:
+                    break
+
+            # Deck elimination: the hand is always 4 distinct cards from the 8-card deck, so the
+            # last unresolved slot can be settled from what is left even with a weak raw score.
+            missing_slots = [i for i in range(4) if i not in assigned]
+            remaining = [c for c in self.deck_cards if c not in used_cards]
+            if len(missing_slots) == 1 and remaining:
+                slot_idx = missing_slots[0]
+                best_left = max(
+                    ((self._best_score(descriptors[slot_idx], c), c) for c in remaining
+                     if c in self._templates),
+                    default=(0.0, ""),
+                )
+                if best_left[1] and best_left[0] >= self.ELIMINATION_FLOOR:
+                    assigned[slot_idx] = (best_left[1], round(max(0.45, best_left[0]), 3))
+                    logger.debug("Filled hand slot %d by deck elimination -> %s (%.3f)",
+                                 slot_idx, best_left[1], best_left[0])
 
         results: List[HandSlot] = []
         for idx in range(4):
-            card_name, conf = assigned_slots.get(idx, ("unknown", 0.0))
+            card_name, conf = assigned.get(idx, ("unknown", 0.0))
             info = get_card_info(card_name)
-            saturated = self._is_slot_saturated(slot_crops[idx])
-            affordable = current_elixir + 0.15 >= float(info.elixir) if card_name != "unknown" else saturated
+            saturated = self._is_slot_saturated(crops[idx])
+            affordable = (current_elixir + 0.15 >= float(info.elixir)) if card_name != "unknown" else saturated
             results.append(
                 HandSlot(
                     slot_index=idx,
@@ -147,37 +201,45 @@ class HandCardDetector:
             )
         return results
 
-    @staticmethod
-    def _prepare_descriptor(crop_bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        # Center-crop slightly to exclude bottom level text & top elixir drop icon variance
-        h, w = crop_bgr.shape[:2]
-        inner = crop_bgr[int(0.14 * h) : int(0.82 * h), int(0.10 * w) : int(0.90 * w)]
-        if inner.size == 0:
-            inner = crop_bgr
-        resized = cv2.resize(inner, (64, 72), interpolation=cv2.INTER_AREA)
-        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
-        hist = cv2.calcHist([hsv], [0, 1], None, [24, 16], [0, 180, 0, 256])
-        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
-        return resized, hist
+    def _fallback_hand(
+        self, frame_bgr: np.ndarray, crops: List[np.ndarray], current_elixir: float
+    ) -> List[HandSlot]:
+        """Without templates, still expose slot geometry + readiness so calibration works."""
+        out: List[HandSlot] = []
+        for idx in range(4):
+            out.append(
+                HandSlot(
+                    slot_index=idx,
+                    card_name="unknown",
+                    elixir_cost=3,
+                    is_ready=self._is_slot_saturated(crops[idx]),
+                    is_evolved=self._has_evo_glow(frame_bgr, idx),
+                    confidence=0.0,
+                    tap_xy=self.grid.hand_slot_pixel(idx),
+                )
+            )
+        return out
 
+    # -- pixel helpers ---------------------------------------------------------------
     @staticmethod
     def _is_slot_saturated(crop_bgr: np.ndarray) -> bool:
-        """Cards that cannot be afforded yet are greyed out (low HSV Saturation)."""
+        """Cards you cannot afford are desaturated/greyed out."""
         if crop_bgr.size == 0:
             return False
         hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
-        mean_sat = float(np.mean(hsv[:, :, 1]))
-        return mean_sat >= 42.0
+        return float(np.mean(hsv[:, :, 1])) >= 46.0
 
     def _has_evo_glow(self, frame_bgr: np.ndarray, slot_index: int) -> bool:
-        """Detect the bright purple/magenta Evolution diamond at the top edge of a hand slot."""
+        """Detect the bright purple Evolution diamond at the top edge of a hand slot."""
         h, w = frame_bgr.shape[:2]
-        cx, cy = self.grid.hand_slot_pixel(slot_index)
-        half_h = int(round(0.5 * self.SLOT_CROP_H_RATIO * h))
-        top_y = cy - half_h
-        roi = frame_bgr[max(0, top_y - 14) : min(h, top_y + 12), max(0, cx - 20) : min(w, cx + 20)]
+        self.grid.resize(w, h)
+        x1, y1, x2, y2 = self.grid.hand_slot_rect(slot_index)
+        band = int(max(4, (y2 - y1) * self.EVO_GLOW_ROI_SCALE))
+        cx = (x1 + x2) // 2
+        half = max(6, (x2 - x1) // 3)
+        roi = frame_bgr[max(0, y1 - band) : min(h, y1 + band), max(0, cx - half) : min(w, cx + half)]
         if roi.size == 0:
             return False
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         evo_mask = cv2.inRange(hsv, np.array([135, 135, 165]), np.array([168, 255, 255]))
-        return (float(np.count_nonzero(evo_mask)) / float(evo_mask.size)) >= 0.16
+        return (float(np.count_nonzero(evo_mask)) / float(evo_mask.size)) >= 0.14
