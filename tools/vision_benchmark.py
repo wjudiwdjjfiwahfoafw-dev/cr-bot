@@ -1,4 +1,4 @@
-"""Measure troop detection against known ground truth on a *real* device frame.
+"""Measure synthetic/composited scenarios on a real device-frame background.
 
 Why
 ---
@@ -7,7 +7,7 @@ rates, so they can only be fixed if the rates are measured. This harness builds 
 sequence from the real 720x1280 device frame shipped in the repo:
 
 1. the three troops that are actually in the frame are inpainted away, giving a clean arena floor;
-2. the background model is warmed on that clean floor (exactly like the start of a match);
+2. the background model is warmed on that artificial clean floor;
 3. known sprites are pasted one at a time, with the real arena, real HUD and real calibration,
    and the detector's output is scored against what was pasted.
 
@@ -46,7 +46,7 @@ SPRITES = REPO_ROOT / "assets" / "unit_sprites"
 #: troops that really are in the sample frame (x1, y1, x2, y2) in frame pixels
 REAL_UNITS = (
     ((68, 486, 236, 626), "giant"),
-    ((104, 200, 186, 256), "musketeer"),
+    ((52, 203, 143, 277), "miner"),
     ((486, 268, 626, 404), "mega_knight"),
 )
 
@@ -224,8 +224,7 @@ def run_real_frame(detector_cls=BlobUnitDetector, frames: int = 6, quiet: bool =
                    **det_kwargs) -> Tally:
     """Warm up on the empty floor, then show the *original* frame (troops + structures appear).
 
-    This is the honest stress test for "boxes where there are no troops": towers and bridges all
-    differ from the learned floor at once, exactly like the start of a match.
+    This is an inpaint-and-reveal stress test, not a real temporal sequence or live recall test.
     """
     frame = load_frame()
     clean = clean_floor(frame)
@@ -285,7 +284,7 @@ def main() -> int:
     if args.scenario in ("real", "both"):
         out["real"] = run_real_frame(frames=args.frames, quiet=args.quiet)
         print(out["real"].row("real frame"))
-        print("  (real frame: 3 troops + 6 towers/bridges; every extra box is a phantom)")
+        print("  (single still revealed after artificial inpainting; not live-stream recall)")
     if args.json:
         args.json.write_text(json.dumps({k: v.as_dict() for k, v in out.items()}, indent=2))
     return 0

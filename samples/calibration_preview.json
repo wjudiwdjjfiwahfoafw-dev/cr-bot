@@ -1,8 +1,8 @@
 {
-  "note": "Real 720x1280 capture of a trainer match (opponent: 'Ausbilder Jonas'). All three visible troops belong to the OPPONENT: the Giant has already crossed the river and is coming toward my towers, the Mega Knight sits by the enemy king tower and the Musketeer behind the enemy left princess tower. My own hand (Musketeer / Minion Horde / Goblin Gang) is visible in the card tray. Boxes are sprite-only, health bars excluded.",
+  "note": "Real 720x1280 Training Camp capture. The troop by the enemy left princess tower has a miner helmet and shovel, and its blue bar marks it as an ally; it is partially obscured by the tower's level badge and HP display. The blue-bar Mega Knight is also allied, while the red-bar Giant is an enemy. Labels corrected after inspecting the original pixels; the earlier Musketeer/all-enemy labels were wrong.",
   "expect": [
-    {"name": "giant",       "box": [63, 487, 241, 630], "card": "giant",       "side": "enemy", "note": "crossed the river, walking down the left lane"},
-    {"name": "mega knight", "box": [497, 285, 620, 395], "card": "mega_knight", "side": "enemy", "note": "in front of the enemy king tower"},
-    {"name": "musketeer",   "box": [92, 205, 180, 262],  "card": "musketeer",   "side": "enemy", "note": "behind the enemy left princess tower"}
+    {"name": "giant", "box": [63, 487, 241, 630], "card": "giant", "side": "enemy", "note": "crossed the river, walking down the left lane"},
+    {"name": "mega knight", "box": [497, 285, 620, 395], "card": "mega_knight", "side": "ally", "note": "blue bar, in front of the destroyed enemy right tower"},
+    {"name": "miner", "box": [52, 203, 143, 277], "card": "miner", "side": "ally", "partial": true, "note": "blue bar; helmet and shovel visible, body obscured by enemy tower HP badge"}
   ]
 }

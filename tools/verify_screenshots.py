@@ -10,8 +10,8 @@ things that make a detector unusable rather than merely weak:
 * **wrong side** - an ally called an enemy, which makes the brain cast at its own tower;
 * **flicker** - the same troop appearing/disappearing/teleporting between consecutive frames.
 
-Naming is reported separately and more forgivingly, because a missing *name* only costs a
-suboptimal counter, while a phantom unit costs the game.
+Naming is reported separately: exact card agreement, wrong names and abstentions are distinguished.
+A missing name is not counted as a correct prediction.
 
     python tools/verify_screenshots.py samples/*.png
     python tools/verify_screenshots.py samples/*.png --annotate samples/annotated --json out.json
@@ -45,8 +45,6 @@ MATCH_RADIUS_TILES = 1.5
 DUPLICATE_RADIUS_TILES = 0.9
 #: a troop that moves more than this between consecutive frames is a flicker, not a walk
 MAX_STEP_TILES = 3.5
-#: box overlap (IoU) required for a *name* to be credited to the right troop
-BOX_IOU_MIN = 0.25
 
 
 @dataclass
@@ -124,7 +122,8 @@ def _inside(det: dict, label: Label) -> float:
 
 
 def score_frame(image_path: Path, warm_frames: int = 5, recognizer: Optional[UnitRecognizer] = None,
-                annotate: Optional[Path] = None, scenario: str = "arrival") -> FrameScore:
+                annotate: Optional[Path] = None, scenario: str = "arrival",
+                enable_recognition: bool = True) -> FrameScore:
     frame = cv2.imread(str(image_path))
     if frame is None:
         raise SystemExit(f"cannot read {image_path}")
@@ -148,11 +147,14 @@ def score_frame(image_path: Path, warm_frames: int = 5, recognizer: Optional[Uni
     # troops part of the floor and the arena reads as empty, which is not a fair test of the
     # detector (and warm-up on identical frames is not a valid scenario either). So the arena is
     # reconstructed by inpainting the labelled sprites out: "this is the empty board, now the
-    # troops arrive". That is exactly what happens in a match, and it uses only the labels, never
-    # the detector's own answer.
+    # troops arrive". This is an artificial scenario, not the true prior match history; it uses
+    # only the labels, never the detector's own answer.
     scenario = scenario or "arrival"
     empty = _empty_board(frame, labels) if scenario == "arrival" else frame
-    backend = ArenaUnitBackend()
+    backend = ArenaUnitBackend(recognizer=recognizer, enable_recognition=enable_recognition)
+    # Exclude one-time asset loading from the frame timing, as it can happen at startup.
+    if enable_recognition and recognizer is not None:
+        _ = recognizer.is_ready
     for i in range(warm_frames):
         crop, _dx, _dy = _crop(empty, i)
         backend.detect(crop, _grid_for(crop, calibration))
@@ -178,7 +180,6 @@ def score_frame(image_path: Path, warm_frames: int = 5, recognizer: Optional[Uni
         cx = 0.5 * (label.box[0] + label.box[2])
         cy = 0.5 * (label.box[1] + label.box[3])
         for di, det in enumerate(score.detections):
-            px, py = grid.tile_to_pixel(det["tile"][0], det["tile"][1])
             distance_tiles = float(np.hypot(det["tile"][0] - _tile_of(grid, cx, cy)[0],
                                             det["tile"][1] - _tile_of(grid, cx, cy)[1]))
             pairs.append((distance_tiles, li, di, _inside(det, label)))
@@ -205,7 +206,7 @@ def score_frame(image_path: Path, warm_frames: int = 5, recognizer: Optional[Uni
         named = det["name"]
         if named.startswith("unknown_"):
             score.names_unnamed.append(label.card)
-        elif named == label.card or _alias(label.card, named):
+        elif named == label.card:
             score.names_right += 1
         else:
             score.names_wrong.append(f"{label.card} -> {named}")
@@ -233,36 +234,13 @@ def _empty_board(frame: np.ndarray, labels: Sequence[Label]) -> np.ndarray:
     return cv2.inpaint(frame, mask, 5, cv2.INPAINT_TELEA)
 
 
-def _alias(truth: str, predicted: str) -> bool:
-    """Cards that share identical art (a skeleton army frame is a skeleton frame)."""
-    group = {"skeletons", "skeleton_army"}
-    return truth in group and predicted in group
-
-
 def _tile_of(grid: ArenaGrid, px: float, py: float) -> Tuple[float, float]:
     return grid.pixel_to_tile(px, py)
 
 
 def _crop(frame: np.ndarray, seed: int, amount: int = 2) -> Tuple[np.ndarray, int, int]:
-    """A viewpoint wobble of a couple of pixels, at *constant* frame size.
-
-    The size has to stay constant: the background model allocates its buffers per frame size,
-    so a screenshot cropped to a new size every call resets it and it never finishes warming up.
-    A live stream also delivers one fixed size, so this is the honest simulation. The border is
-    replicated, and the returned offsets let callers map detections back to the original image.
-    """
-    dx = int((seed * 7) % (2 * amount + 1)) - amount
-    dy = int((seed * 13) % (2 * amount + 1)) - amount
-    if True:
-        # No jitter: a stream of a still screenshot delivers identical frames, and the empty
-        # board is reconstructed by inpainting the labelled sprites out, so there is nothing to
-        # avoid learning. Jitter here would only test the viewpoint compensator on every frame.
-        return frame, 0, 0
-    matrix = np.float32([[1, 0, dx], [0, 1, dy]])
-    h, w = frame.shape[:2]
-    moved = cv2.warpAffine(frame, matrix, (w, h), flags=cv2.INTER_LINEAR,
-                           borderMode=cv2.BORDER_REPLICATE)
-    return np.ascontiguousarray(moved), dx, dy
+    """Use the original fixed-size image; a still screenshot does not contain real motion."""
+    return frame, 0, 0
 
 
 def _grid_for(frame: np.ndarray, calibration) -> ArenaGrid:
@@ -292,15 +270,18 @@ def _draw(frame: np.ndarray, grid: ArenaGrid, score: FrameScore, out_path: Path)
 def stability(scores: Sequence[FrameScore]) -> List[str]:
     """Frame-to-frame consistency for a sequence of captures of the same battle."""
     problems: List[str] = []
-    previous: List[dict] = []
+    previous: Optional[List[dict]] = None
     for score in scores:
         current = score.detections
+        if previous is None:
+            previous = current
+            continue
         for det in current:
-            best, best_d = None, 1e9
+            best_d = 1e9
             for old in previous:
                 d = float(np.hypot(det["tile"][0] - old["tile"][0], det["tile"][1] - old["tile"][1]))
                 if d < best_d:
-                    best, best_d = old, d
+                    best_d = d
             if best_d > MAX_STEP_TILES:
                 problems.append(f"{score.image.name}: {det['name']} at {det['tile']} has no "
                                 f"match in the previous frame (appeared out of nowhere)")
@@ -347,7 +328,7 @@ def main() -> int:
     for path in args.images:
         annotate = (args.annotate / f"{path.stem}_scored.png") if args.annotate else None
         score = score_frame(path, warm_frames=args.warm, recognizer=recognizer,
-                            annotate=annotate)
+                            annotate=annotate, enable_recognition=not args.no_naming)
         print(format_score(score))
         print()
         scores.append(score)
@@ -370,8 +351,10 @@ def main() -> int:
         print(f"names correct      {right}/{named_attempts} "
               f"({100.0 * right / named_attempts:.0f}%)")
     if len(scores) > 1:
+        # Each still is scored with its own inpainted background. This is only a positional
+        # comparison, not a continuous replay of the live tracker.
         drift = stability(scores)
-        print(f"frame-to-frame     {'clean' if not drift else str(len(drift)) + ' problem(s)'}")
+        print(f"position comparison {'clean' if not drift else str(len(drift)) + ' change(s)'}")
         for line in drift[:10]:
             print(f"    {line}")
 
@@ -385,8 +368,9 @@ def main() -> int:
             "names_wrong": s.names_wrong, "names_unnamed": s.names_unnamed,
             "ms": round(s.ms, 1),
         } for s in scores], indent=2))
-    clean = total_phantoms == 0 and total_dups == 0 and total_wrong_side == 0 \
-        and total_matched == total_labels
+    print("Counts are relative to supplied labels; inpainted stills are not live-stream recall.")
+    clean = all(s.calibrated for s in scores) and total_phantoms == 0 and total_dups == 0 \
+        and total_wrong_side == 0 and total_matched == total_labels
     return 0 if clean else 1
 
 

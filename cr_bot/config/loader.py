@@ -41,6 +41,7 @@ class BotConfig:
     yolo_weights_path: Optional[str] = "weights/clash_yolov8n.onnx"
     yolo_confidence: float = 0.42
     enable_opencv_fallback: bool = True
+    enable_unit_recognition: bool = True
     tower_level: int = 11
 
     # --- real-device capture / input ------------------------------------------------
@@ -66,7 +67,7 @@ class BotConfig:
     )
     #: explicit scrcpy server jar (default: newest bundled)
     identity_dir: str = "assets/unit_identity"
-    enable_identity_learning: bool = True
+    enable_identity_learning: bool = False
     keep_screen_on: bool = True
     lock_portrait: bool = True
     adb_latency_sec: float = 0.10
@@ -130,6 +131,7 @@ def load_config(path: str | Path) -> BotConfig:
         yolo_weights_path=vision_cfg.get("yolo_weights_path", "weights/clash_yolov8n.onnx"),
         yolo_confidence=float(vision_cfg.get("yolo_confidence", 0.42)),
         enable_opencv_fallback=bool(vision_cfg.get("enable_opencv_fallback", True)),
+        enable_unit_recognition=bool(vision_cfg.get("unit_recognition", True)),
         tower_level=int(tactics_cfg.get("tower_level", 11)),
         capture_width=int(capture_cfg.get("width", 720)),
         capture_backend=str(capture_cfg.get("backend", "auto")),
@@ -145,7 +147,7 @@ def load_config(path: str | Path) -> BotConfig:
         game_package_hints=list(game_cfg.get("package_hints", None) or
                                 ["clashroyale", "clash_royale", "nullsroyale"]),
         identity_dir=str(vision_cfg.get("identity_dir", "assets/unit_identity")),
-        enable_identity_learning=bool(vision_cfg.get("identity_learning", True)),
+        enable_identity_learning=bool(vision_cfg.get("identity_learning", False)),
         keep_screen_on=bool(adb_cfg.get("keep_screen_on", True)),
         lock_portrait=bool(adb_cfg.get("lock_portrait", True)),
         adb_latency_sec=float(adb_cfg.get("latency_sec", 0.10)),

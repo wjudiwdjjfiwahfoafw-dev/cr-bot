@@ -129,44 +129,39 @@ def test_a_wobbling_capture_is_quiet_frame_after_frame() -> None:
 # ---------------------------------------------------------------------------------------------
 # identity: which colour means "ally" is not a constant
 # ---------------------------------------------------------------------------------------------
-def test_ally_colour_is_learned_from_our_own_towers_not_assumed() -> None:
-    """On the real frame our towers draw RED bars and the enemy's draw BLUE.
-
-    A fixed "red = enemy" rule therefore reads every unit backwards, which is how an enemy Mega
-    Knight came out as an ally.
-    """
+def test_colour_calibration_does_not_learn_from_troops_and_scenery() -> None:
+    """The earlier 4-tile tower rule mistook blue troops and orange floor for tower bars."""
     frame = _real_frame()
     grid = _grid_for(frame)
-    backend = ArenaUnitBackend()
-    for _ in range(6):
+    backend = ArenaUnitBackend(enable_recognition=False)
+    for _ in range(7):
         backend.detect(frame, grid)
-    backend.detect(frame, grid)
-    assert backend._ally_hue is not None and backend._enemy_hue is not None, (
-        "the team colours were never learned, although the frame has six tower bars"
-    )
-    ours = backend._ally_hue
-    theirs = backend._enemy_hue
-    assert abs(ours - theirs) > 30, (
-        f"learned ally hue {ours:.0f} and enemy hue {theirs:.0f} are too close to tell apart"
-    )
-    # red-ish is hue near 0/180, blue-ish near 100-120; on this capture ours is the red one
-    assert min(abs(ours - 0), abs(ours - 180)) < 30, (
-        f"our towers read as hue {ours:.0f}, expected a red bar"
-    )
+    # There are not enough reliable tower bars here. Retain the normal blue-ally/red-enemy rule.
+    assert backend._ally_hue is None and backend._enemy_hue is None
+    from cr_bot.models import Side
+    assert backend._correct_side(Side.ALLY, 105) == Side.ALLY
+    assert backend._correct_side(Side.ENEMY, 0) == Side.ENEMY
 
 
 @pytest.mark.skipif(not REAL_FRAME.exists(), reason="no real frame")
-def test_real_screenshot_units_are_all_reported_with_the_right_side() -> None:
-    """The three troops in the real capture are all the opponent's; none may be called an ally."""
+def test_real_screenshot_units_are_reported_with_the_right_side() -> None:
+    """Blue Mega Knight and partly hidden Miner are allies; the red Giant is an enemy."""
     frame = _real_frame()
     grid = _grid_for(frame)
     backend, _empty = _settled_backend(frame, grid)
     detections = backend.detect(frame, grid)
-    assert detections, "the three troops in the real frame were not detected at all"
-    assert len(detections) == 3, f"expected exactly 3 troops, got {len(detections)}"
-    wrong = [d for d in detections if d.side.value != "enemy"]
-    assert not wrong, [f"{d.name} at ({d.tile_x:.1f},{d.tile_y:.1f}) called {d.side.value}"
-                       for d in wrong]
+    labels = json.loads((REPO_ROOT / "samples" / "calibration_preview.json").read_text())["expect"]
+    assert len(detections) == len(labels) == 3
+    from tools.verify_screenshots import Label, _inside
+    used = set()
+    for entry in labels:
+        lab = Label(tuple(entry["box"]))
+        matches = sorted(((_inside({"box": det.pixel_bbox}, lab), idx, det)
+                          for idx, det in enumerate(detections) if idx not in used), reverse=True)
+        overlap, idx, det = matches[0]
+        assert overlap >= 0.1, f"no overlapping detection for {entry['name']}"
+        assert det.side.value == entry["side"], (entry["name"], det.side)
+        used.add(idx)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -202,7 +197,7 @@ def test_an_ambiguous_match_is_left_unnamed() -> None:
     groups = recognizer.duplicate_groups
     assert groups, "the library's byte-identical cards were not detected as duplicates"
     assert any("skeletons" in group for group in groups)
-    # a duplicate is an alias, not a runner-up: naming one must not be blocked by the other
+    # The lookup records aliases, but a shared frame must remain an ambiguous prediction.
     aliases = recognizer._aliases_of("skeleton_army")
     assert "skeletons" in aliases and "skeleton_army" in aliases
 

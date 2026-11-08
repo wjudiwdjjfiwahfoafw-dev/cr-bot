@@ -592,8 +592,8 @@ def test_a_damaged_unit_is_not_split_in_two_by_its_health_bar() -> None:
 #
 # ``ArenaUnitBackend._remember`` feeds detections back into the identity library. That makes a
 # single misread permanent: a Wizard read as a Musketeer becomes a Musketeer *sample*, and the
-# matcher then agrees with its own mistake on every later frame. The label is only verifiable
-# when the bot produced it - i.e. for its own units - so learning is restricted to those.
+# matcher then agrees with its own mistake on every later frame. Even an allied detector label
+# is just a guess: only an explicit verified_deploy source may use this hook.
 # ======================================================================================
 
 def _raw(name, side, confidence=0.9, hp_ratio=1.0, source="segmentation"):
@@ -622,7 +622,7 @@ def test_identity_memory_never_learns_from_enemy_detections(tmp_path) -> None:
     assert backend.learned_samples == 0
 
 
-def test_identity_memory_learns_from_a_clean_allied_detection(tmp_path) -> None:
+def test_identity_memory_does_not_self_train_from_an_ally_guess(tmp_path) -> None:
     from cr_bot.vision.arena_detector import ArenaUnitBackend
 
     memory = UnitIdentityMemory(directory=tmp_path, namespace="t")
@@ -632,9 +632,13 @@ def test_identity_memory_learns_from_a_clean_allied_detection(tmp_path) -> None:
 
     backend._remember([ally], frame, ArenaGrid(720, 1280, _flat_calibration()))
 
-    assert memory.sample_count >= 1
+    assert memory.sample_count == 0
+    assert backend.learned_samples == 0
+    ally.source = "verified_deploy"
+    backend._remember([ally], frame, ArenaGrid(720, 1280, _flat_calibration()))
+    assert memory.sample_count == 1
     assert "mega_knight" in memory.known_cards
-    assert backend.learned_samples >= 1
+    assert backend.learned_samples == 1
 
 
 def test_identity_memory_ignores_damaged_uncertain_and_unnamed_units(tmp_path) -> None:
@@ -644,9 +648,9 @@ def test_identity_memory_ignores_damaged_uncertain_and_unnamed_units(tmp_path) -
     grid = ArenaGrid(720, 1280, _flat_calibration())
     frame = _arena_background()
     cases = {
-        "damaged": _raw("mega_knight", Side.ALLY, hp_ratio=0.4),
-        "low confidence": _raw("mega_knight", Side.ALLY, confidence=0.45),
-        "unnamed": _raw("unknown_medium", Side.ALLY),
+        "damaged": _raw("mega_knight", Side.ALLY, hp_ratio=0.4, source="verified_deploy"),
+        "low confidence": _raw("mega_knight", Side.ALLY, confidence=0.45, source="verified_deploy"),
+        "unnamed": _raw("unknown_medium", Side.ALLY, source="verified_deploy"),
         "bar fallback": _raw("mega_knight", Side.ALLY, source="bars"),
     }
     for label, det in cases.items():

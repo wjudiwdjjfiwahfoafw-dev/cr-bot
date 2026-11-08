@@ -1,0 +1,461 @@
+{
+  "baseline_commit": "b168a424389665fe13cea0c0d63e9eb2aac58bcf",
+  "method": "Original UnitRecognizer, default thresholds, supplied source boxes, has_bar=False; not full-frame detection.",
+  "limitations": "Imperfect labels, possible related screenshots; additional images collected after current gates were set.",
+  "counts": {
+    "development": {
+      "abstained": 24,
+      "wrong": 2
+    },
+    "additional": {
+      "abstained": 28,
+      "wrong": 1
+    },
+    "all": {
+      "abstained": 52,
+      "wrong": 3
+    }
+  },
+  "results": [
+    {
+      "image": "01_0_baby_dragon.png",
+      "truth": "baby_dragon",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "01_1_ice_wizard.png",
+      "truth": "ice_wizard",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "01_2_tesla.png",
+      "truth": "tesla",
+      "predicted": "witch",
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "wrong"
+    },
+    {
+      "image": "01_3_knight.png",
+      "truth": "knight",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "01_4_barbarians.png",
+      "truth": "barbarians",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "01_5_knight.png",
+      "truth": "knight",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "01_6_knight.png",
+      "truth": "knight",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "01_7_baby_dragon.png",
+      "truth": "baby_dragon",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "02_0_cannon.png",
+      "truth": "cannon",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "02_1_lumberjack.png",
+      "truth": "lumberjack",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "02_2_ice_golem.png",
+      "truth": "ice_golem",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "02_3_bandit.png",
+      "truth": "bandit",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "03_0_mwitch.png",
+      "truth": "mother_witch",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "03_1_snowball.png",
+      "truth": "giant_snowball",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "03_2_gobhut.png",
+      "truth": "goblin_hut",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "03_3_pekka.png",
+      "truth": "pekka",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "03_4_minions.png",
+      "truth": "minions",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "04_0_mini_pekka.png",
+      "truth": "mini_pekka",
+      "predicted": "witch",
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "wrong"
+    },
+    {
+      "image": "04_1_dart.png",
+      "truth": "dart_goblin",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "04_2_valkyrae.png",
+      "truth": "valkyrie",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "04_3_btower.png",
+      "truth": "bomb_tower",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "04_4_fireball.png",
+      "truth": "fireball",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "05_0_baby_dragon.png",
+      "truth": "baby_dragon",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "05_1_baby_dragon.png",
+      "truth": "baby_dragon",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "05_2_goblin_cage_brawler.png",
+      "truth": "goblin_cage_brawler",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "05_3_pekka.png",
+      "truth": "pekka",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "development",
+      "status": "abstained"
+    },
+    {
+      "image": "06_0_princess.png",
+      "truth": "princess",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "06_1_inferno_tower.png",
+      "truth": "inferno_tower",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "06_2_minions.png",
+      "truth": "minions",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "06_3_bomb.png",
+      "truth": "bomb",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "07_0_goblin_cage.png",
+      "truth": "goblin_cage",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "07_1_xbow.png",
+      "truth": "x_bow",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "07_2_tesla.png",
+      "truth": "tesla",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "08_0_egiant.png",
+      "truth": "electro_giant",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "08_1_inferno_dragon.png",
+      "truth": "inferno_dragon",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "08_2_nwitch.png",
+      "truth": "night_witch",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "09_0_zappies.png",
+      "truth": "zappies",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "10_0_cannon.png",
+      "truth": "cannon",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "10_1_log.png",
+      "truth": "the_log",
+      "predicted": "valkyrie",
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "wrong"
+    },
+    {
+      "image": "11_0_egolem.png",
+      "truth": "elixir_golem",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "11_1_nwitch.png",
+      "truth": "night_witch",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "12_0_skeleton_dragons.png",
+      "truth": "skeleton_dragons",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "12_1_bowler.png",
+      "truth": "bowler",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "12_2_three_muskeeters.png",
+      "truth": "three_musketeers",
+      "predicted": null,
+      "split": "train",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_0_piggies.png",
+      "truth": "royal_hogs",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_1_goblin_cage.png",
+      "truth": "goblin_cage",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_2_knight.png",
+      "truth": "knight",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_3_ice_golem.png",
+      "truth": "ice_golem",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_4_baby_dragon.png",
+      "truth": "baby_dragon",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_5_hunter.png",
+      "truth": "hunter",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "13_6_hunter.png",
+      "truth": "hunter",
+      "predicted": null,
+      "split": "test",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "14_0_dark_prince.png",
+      "truth": "dark_prince",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "14_1_baby_dragon.png",
+      "truth": "baby_dragon",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "15_0_barbarians.png",
+      "truth": "barbarians",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    },
+    {
+      "image": "15_1_muskeeter.png",
+      "truth": "musketeer",
+      "predicted": null,
+      "split": "validation",
+      "evaluation_group": "additional",
+      "status": "abstained"
+    }
+  ]
+}

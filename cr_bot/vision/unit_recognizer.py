@@ -1,16 +1,13 @@
 """Give a detected troop its card name by matching it against the real in-game sprite library.
 
-Why this module exists
-----------------------
-``SpriteLibrary``/``SpriteMatcher`` were in the repo, and ``assets/unit_sprites`` holds real
-extracted animation frames for 53 cards — but nothing in the detection path ever called them. On
-a real phone every box therefore came out as ``unknown_tank`` / ``unknown_medium`` /
-``unknown_swarm``: the bot knew *where* a troop was and roughly how big, never *what* it was.
-That is the difference between "something is at the bridge" and "that is a Mega Knight, keep the
-Zap for the Bats".
+Integration
+-----------
+``ArenaUnitBackend`` calls this recognizer for eligible measured segmentation boxes. It is lazy,
+optional, limited to one attempt per frame and may abstain; the tracker carries accepted names
+through subsequent generic frames. The sprite files are not a reliable stand-in for every live
+pose and device tint (see ``tools/recognition_benchmark.py``).
 
-Two problems had to be solved before it could be switched on, and both are measured in
-``tools/recognition_benchmark.py``:
+Two challenges remain important:
 
 **Cost.** ``SpriteMatcher.identify_window`` fits all 53 cards × 303 frames × 3 scales × 27 offsets
 into the box: ~300 ms *per troop*. Useless in a 60 fps loop.
@@ -28,13 +25,16 @@ So the search runs in two stages:
 2. **fine** — the surviving handful are re-scored over all their frames and scales with the
    existing ``identify_window`` machinery.
 
-The answer is only returned when it clears an absolute score floor *and* beats the runner-up by a
-margin: a wrong name is worse than no name, because the brain uses a name to pick a counter and
-to decide whether a spell resets it.
+The answer is only returned when it clears an absolute score floor, beats an independent
+runner-up, and the winning template explains enough of the detected box. A wrong name is worse
+than no name: on real labelled crops a narrow Witch template used to match part of a Tesla and a
+Mini P.E.K.K.A with high confidence. The shipped sprite set also contains byte-identical art for
+some *different cards*. Such a match is ambiguous, not proof of either card.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,10 +44,8 @@ import cv2
 import numpy as np
 
 from cr_bot.vision.sprite_matcher import (
-    SpriteHit,
     SpriteLibrary,
     SpriteMatcher,
-    SpriteTemplate,
     masked_zncc_at,
     prepare_gray,
 )
@@ -64,7 +62,7 @@ class Recognition:
 
     card: str
     score: float
-    #: best score of any other *card* (sibling names for the same art are not counted)
+    #: best score of another *card* (shared winning art is rejected as ambiguous)
     runner_up: float
     margin: float
     bbox: Tuple[int, int, int, int]
@@ -86,9 +84,12 @@ class UnitRecognizer:
         How many cards survive the cheap first stage.
     """
 
-    DEFAULT_MIN_SCORE = 0.60
-    DEFAULT_MIN_MARGIN = 0.05
+    # Calibrated conservatively against the real labelled crops in tests/fixtures, not against
+    # pastes of these very same templates. This is an open-set matcher, not a probability.
+    DEFAULT_MIN_SCORE = 0.75
+    DEFAULT_MIN_MARGIN = 0.07
     DEFAULT_COARSE_KEEP = 6
+    MIN_BOX_COVERAGE = 0.55
     #: fractions of the box height that are treated as a health bar and cropped away
     BAR_CROP_FRACTION = 0.22
 
@@ -105,15 +106,18 @@ class UnitRecognizer:
         self.enabled = bool(enabled)
         self.min_score = float(min_score)
         self.min_margin = float(min_margin)
-        self.coarse_keep = int(coarse_keep)
+        self.coarse_keep = max(1, int(coarse_keep))
         self._matcher = matcher
         self._sprites_dir = Path(sprites_dir)
         self._max_cards = max_cards
+        self._prepared = False
         #: card -> (gray, mask) of its median frame, prepared once (see _representatives)
         self._reps: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
         self._scaled: Dict[Tuple[str, int], Tuple[np.ndarray, np.ndarray]] = {}
         #: cards whose art is byte-identical to another card's (skeletons vs skeleton_army, ...)
         self.duplicate_groups: List[List[str]] = []
+        #: (card, frame index) -> other cards with precisely the same frame
+        self._frame_aliases: Dict[Tuple[str, int], set[str]] = {}
         self.named = 0
         self.attempted = 0
 
@@ -137,7 +141,9 @@ class UnitRecognizer:
                 self.enabled = False
                 return None
             self._matcher = SpriteMatcher(library=library)
+        if not self._prepared:
             self._prepare()
+            self._prepared = True
         return self._matcher
 
     @property
@@ -157,7 +163,7 @@ class UnitRecognizer:
     def _prepare(self) -> None:
         """Build one representative template per card, and find duplicate artwork."""
         assert self._matcher is not None
-        groups: Dict[str, List[str]] = {}
+        signatures: Dict[bytes, List[Tuple[str, int]]] = {}
         for card in self._matcher.library.cards:
             frames = self._matcher.library.frames_for(card)
             if not frames:
@@ -166,11 +172,25 @@ class UnitRecognizer:
             rep = sorted(frames, key=lambda f: abs(f.aspect - float(np.median(
                 [x.aspect for x in frames]))))[0]
             self._reps[card] = (rep.gray, rep.mask)
-            key = f"{rep.gray.shape}:{int(rep.mask.sum())}"
-            groups.setdefault(key, []).append(card)
-        self.duplicate_groups = [g for g in groups.values() if len(g) > 1]
+            for frame in frames:
+                # Shape and mask area alone are not an identity check. Compare the actual
+                # prepared pixels and mask, including shape, for every frame, not only the rep.
+                digest = hashlib.sha256()
+                digest.update(str(frame.gray.shape).encode("ascii"))
+                digest.update(frame.gray.tobytes())
+                digest.update(frame.mask.tobytes())
+                signatures.setdefault(digest.digest(), []).append((card, frame.index))
+        groups: set[Tuple[str, ...]] = set()
+        for instances in signatures.values():
+            cards = {card for card, _ in instances}
+            if len(cards) < 2:
+                continue
+            groups.add(tuple(sorted(cards)))
+            for card, index in instances:
+                self._frame_aliases[(card, index)] = cards - {card}
+        self.duplicate_groups = [list(group) for group in sorted(groups)]
         if self.duplicate_groups:
-            logger.debug("cards sharing identical art (kept as aliases): %s",
+            logger.debug("cards sharing identical art (left ambiguous): %s",
                          ", ".join("/".join(g) for g in self.duplicate_groups))
 
     def _scaled_rep(self, card: str, height: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -214,7 +234,7 @@ class UnitRecognizer:
 
         # --- stage 1: cheap rejection over every card -------------------------------
         coarse: List[Tuple[float, str]] = []
-        for card in self._reps:
+        for card in self.cards():
             score = self._coarse_score(card, image, bh, bw)
             if score > -1.0:
                 coarse.append((score, card))
@@ -224,23 +244,26 @@ class UnitRecognizer:
         shortlist = [card for _score, card in coarse[: self.coarse_keep]]
 
         # --- stage 2: proper ranking of the survivors -------------------------------
-        hits = matcher.identify_window(frame_bgr, box, candidates=shortlist, topk=max(2, topk))
+        # Display top-k must not truncate the competitor set used for the safety margin.
+        # Never promote a coarse score when fine matching could not evaluate a candidate.
+        hits = matcher.identify_window(frame_bgr, box, candidates=shortlist, topk=len(shortlist))
+        hits = sorted((hit for hit in hits if np.isfinite(hit.score)),
+                      key=lambda hit: hit.score, reverse=True)
         if not hits:
-            # fall back to the coarse ranking; it is the same evidence, just less thorough
-            hits = [SpriteHit(card=card, score=score, bbox=box, height_px=bh, template=0)
-                    for score, card in coarse[: max(2, topk)]]
-
+            return None
         best = hits[0]
-        aliases = self._aliases_of(best.card)
-        # The library contains cards whose art is byte-identical (a Skeleton Army frame is a
-        # Skeleton frame). Two names for one picture is not ambiguity, so those are excluded
-        # from the runner-up: otherwise every skeleton would be rejected for having a "tie".
-        runner_up = -1.0
-        for hit in hits[1:]:
-            if hit.card in aliases:
-                continue
-            runner_up = max(runner_up, hit.score)
-        margin = float(best.score - runner_up) if runner_up > -1.0 else 1.0
+        # An identical frame can represent different *cards* (e.g. Skeletons and Skeleton
+        # Army). A single sprite cannot distinguish them; don't make an arbitrary card choice.
+        if self._frame_aliases.get((best.card, best.template)):
+            return None
+        bx1, by1, bx2, by2 = best.bbox
+        coverage = max(0, bx2 - bx1) * max(0, by2 - by1) / float(bw * bh)
+        if coverage < self.MIN_BOX_COVERAGE:
+            return None
+        if len(hits) < 2:
+            return None  # no independent runner-up: a margin is not measurable
+        runner_up = float(hits[1].score)
+        margin = float(best.score - runner_up)
 
         if best.score < self.min_score or margin < self.min_margin:
             logger.debug(

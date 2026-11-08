@@ -1,8 +1,7 @@
 # Labelled real screenshots
 
-This directory is the ground truth for the vision pipeline: **real captures of an actual match**,
-with the operator saying which troops are on the board. Nothing synthetic, no menu screens, no
-images from search engines that might be renders.
+This directory holds real match captures and human-readable labels. Labels can be incomplete or
+wrong, especially for occluded units; review the pixels before treating a score as ground truth.
 
 Drop a capture here (PNG or JPG) plus a `.json` sidecar with the same stem:
 
@@ -12,16 +11,16 @@ samples/
   giant_push.json
 ```
 
-The sidecar format (drop the `label` on a box when you do not care what it gets called):
+The sidecar format (omit `card` when you do not know the identity):
 
 ```json
 {
   "note": "1v1, 2x elixir, my Giant at the bridge",
   "expect": [
-    {"name": "bar",
-     "box": [99, 194, 189, 260],
-     "card": "musketeer",
-     "side": "ally"},
+    {"name": "miner",
+     "box": [52, 203, 143, 277],
+     "card": "miner",
+     "side": "ally", "partial": true},
     {"name": "mega knight",
      "box": [493, 262, 629, 400],
      "card": "mega_knight",
@@ -41,7 +40,8 @@ Rules that make the numbers mean something:
 * **`card`** is the asset directory name from `assets/unit_sprites/` (`mega_knight`,
   `hog_rider`, `skeleton_army`, ...). Unknown names are reported as a problem, not silently
   skipped — a typo must never look like a pass.
-* **`side`** is `ally` or `enemy`. Ally = the bottom half of the screen.
+* **`side`** is `ally` or `enemy`, according to team colour. A friendly troop can cross the
+  river, so its screen position alone does not determine allegiance.
 * **List everything you can see**, including troops you expect the bot to be wrong about. It is
   the misses and the phantoms that matter, and they can only be counted if the full board is
   written down.
@@ -55,10 +55,10 @@ Then run:
 python tools/verify_screenshots.py samples/*.png
 ```
 
-and it prints per-screenshot misses / phantoms / duplicates / wrong side, plus the naming
-accuracy, and writes an annotated copy to `samples/annotated/` so you can see exactly what the
-bot thought it saw.
+and it prints per-screenshot misses / extra boxes / duplicates / wrong side, plus exact card
+results. Add `--annotate samples/annotated --json samples/annotated/report.json` to save an
+annotated copy and report. Extra boxes are only valid false positives if the labels are complete.
 
-`validation` and `fps` runs (does the detection flicker frame to frame?) need a *sequence*: name
-the files with an index (`giant_push_0001.png`, `giant_push_0002.png`, ...) and pass them in
-order; the tool scores stability across consecutive frames.
+Each still is scored independently after inpainting its labelled boxes. Passing several stills
+produces only a rough positional comparison; it does **not** run a continuous tracker or establish
+real-sequence flicker, FPS or recall. Those require an annotated gameplay video and true prior frames.

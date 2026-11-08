@@ -251,8 +251,8 @@ class ArenaUnitBackend:
     size class, and a team side; health bars are then only used to refine side and HP.
 
     Identity is optional: :class:`cr_bot.vision.unit_identity.UnitIdentityMemory` supplies card
-    names once the bot has seen enough of its own verified deploys.  Without it, detections keep
-    the size-based ``unknown_*`` label, which is exactly what the brain needs to pick a counter.
+    names for sufficiently similar locally labelled crops. Automatic deployment sampling is
+    experimental and opt-in; without a match detections keep the size-based ``unknown_*`` label.
     """
 
     #: how far below a health bar the unit stands, in tiles (used before segmentation warms up)
@@ -273,24 +273,29 @@ class ArenaUnitBackend:
         self.enable_identity = enable_identity
         self.last_bars: List[HealthBar] = []
         self.stats = DetectorStats()
-        #: how many appearance samples have been learned from verified (own) deployments
+        #: how many appearance samples have been learned from opt-in (own) deployments
         self.learned_samples: int = 0
-        #: consecutive frames in which only bars were found (see RESET_AFTER_STALE_FRAMES)
-        self._stale_frames: int = 0
-        #: bar hue that means ally / enemy on this device, learned from the towers each frame
+        #: bar hues learned only from multiple corroborating tower samples
         self._ally_hue: Optional[float] = None
         self._enemy_hue: Optional[float] = None
+        self._pending_colour_pair: Optional[Tuple[int, int]] = None
+        self._pending_colour_frames = 0
         #: names troops from the real sprite library (see cr_bot.vision.unit_recognizer)
         self.enable_recognition = enable_recognition
         self._recognizer = recognizer
         self._recognizer_failed = False
         #: pixels per tile of the frame being processed (needed by the naming pass)
         self._last_ppt: float = 32.0
+        self._naming_cursor = 0
 
     def reset(self) -> None:
         self.segmenter.reset()
         self.stats = DetectorStats()
-        self._stale_frames = 0
+        self.last_bars = []
+        self._ally_hue = self._enemy_hue = None
+        self._pending_colour_pair = None
+        self._pending_colour_frames = 0
+        self._naming_cursor = 0
 
     # -- main entry ----------------------------------------------------------------
     #: a segmentation blob this uncertain, with no health bar to confirm it, is dropped
@@ -298,12 +303,7 @@ class ArenaUnitBackend:
     #: two detections of the same side this close together are one unit, not two
     DEDUPE_TILES = 0.75
 
-    #: consecutive frames in which only bars (never silhouettes) were found before the background
-    #: model is told to re-learn the arena
-    RESET_AFTER_STALE_FRAMES = 4
-
-    #: how much confidence a bars-only detection loses. It is the weakest evidence class: no
-    #: silhouette, no size measurement, no side vote — just "a bar-shaped capsule is here".
+    #: how much confidence a bars-only detection loses: it has no measured silhouette
     BARS_ONLY_CONFIDENCE = 0.45
 
     def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
@@ -311,23 +311,18 @@ class ArenaUnitBackend:
         units: List[BlobUnit] = []
         if self.enable_segmentation:
             units = self.segmenter.detect(frame_bgr, grid)
-            self.last_bars = self.segmenter.last_bars
+
+        # Read bars and update the team calibration *before* describing units. The bar reader
+        # is also the fallback while the background warms up. Do not reset a learned background
+        # merely because only bars are visible: resetting while a troop is stationary just
+        # teaches the troop as background and causes repeated warm-up flicker.
+        extras = self._detect_bars_only(frame_bgr, grid)
         if not units:
-            # Nothing moving was found: either the background model is still warming up or the
-            # arena is genuinely empty. Bars cover both cases (and are the only signal that
-            # survives a stationary unit on the very first frames).
-            bars_only = self._detect_bars_only(frame_bgr, grid)
-            self._name_troops(bars_only, frame_bgr)
-            return bars_only
+            self.stats.add([], bars=len(self.last_bars), identified=0)
+            return extras
 
         described = [u for u in units if self._keep(u)]
         out = [self._describe(unit, frame_bgr, grid) for unit in described]
-        # A troop that the background model has not learned yet — it is standing still, or it
-        # just walked into a part of the arena the model has not settled — still draws its bar.
-        # Adding those as low-confidence detections makes a unit appear immediately instead of
-        # seconds later, but they must always lose to a real silhouette, so anything segmentation
-        # found within a tile of them wins.
-        extras = self._detect_bars_only(frame_bgr, grid)
         for extra in extras:
             if any(
                 math.hypot(extra.tile_x - d.tile_x, extra.tile_y - d.tile_y) <= 1.0
@@ -336,24 +331,6 @@ class ArenaUnitBackend:
             ):
                 continue
             out.append(extra)
-
-        # Nothing from segmentation while a unit's bar *is* on the board means the background
-        # model has gone stale — typically because the arena changed under it (a tower fell, the
-        # camera shifted a pixel, a unit parked on scenery and was absorbed). Telling it to
-        # re-learn brings the silhouettes back within a few frames. The gate matters: an empty
-        # arena also produces no segmentation, and resetting on that would keep the model in
-        # warm-up forever and detect nothing at all.
-        if out and len(out) == len(extras):
-            self._stale_frames += 1
-            if self._stale_frames >= self.RESET_AFTER_STALE_FRAMES and self.enable_segmentation:
-                logger.info(
-                    "detector: %d frame(s) with bars but no silhouettes; re-learning the arena",
-                    self._stale_frames,
-                )
-                self.segmenter.background.reset()
-                self._stale_frames = 0
-        else:
-            self._stale_frames = 0
 
         out = self._dedupe(out, grid)
         self._name_troops(out, frame_bgr)
@@ -368,7 +345,7 @@ class ArenaUnitBackend:
         A blob can be a troop, or it can be a spell splat, a spawn animation, a Bush that just
         rustled, or the dust from a destroyed tower. The old code accepted all of them, which
         is where "detected as multiple troops" and "phantom enemies" came from. A health bar is
-        proof of a real unit, so a bar-backed blob is always kept.
+        stronger evidence, but can still be wrong; bar-backed blobs are kept for downstream checks.
         """
         if unit.has_bar:
             return True
@@ -407,7 +384,7 @@ class ArenaUnitBackend:
         return kept
 
     #: how far above a unit's head its bar may sit, in tiles
-    BAR_ABOVE_UNIT_TILES = 4.0
+    BAR_ABOVE_UNIT_TILES = 0.85
 
     def _bar_above(self, bbox: Tuple[int, int, int, int], ppt: float) -> Optional[HealthBar]:
         """The health bar that belongs to this sprite box: above its head, centred on it."""
@@ -417,6 +394,8 @@ class ArenaUnitBackend:
         cx = 0.5 * (x1 + x2)
         best, best_dy = None, 1e9
         for bar in self.last_bars:
+            if not getattr(bar, "has_outline", False):
+                continue
             bx1, by1, bx2, by2 = bar.bbox
             gap = y1 - by2
             if not (-0.3 * ppt <= gap <= self.BAR_ABOVE_UNIT_TILES * ppt):
@@ -427,54 +406,78 @@ class ArenaUnitBackend:
                 best, best_dy = bar, gap
         return best
 
-    #: a bar is taken as a tower's sample when its nearest tower is this much nearer than the next
-    TOWER_SAMPLE_MARGIN = 1.6
-    #: ... and when it is within this many tiles of that tower at all
-    TOWER_SAMPLE_RADIUS_TILES = 4.0
+    #: Only bars close to a tower's projected centre, and at/above its crown, qualify.
+    #: Broad 4-tile circles mislabelled nearby troops as tower bars on a real screenshot.
+    TOWER_SAMPLE_RADIUS_TILES = 1.1
+    TOWER_SAMPLE_MAX_BELOW_TILES = 0.35
+    TOWER_SAMPLE_MIN_WIDTH_TILES = 0.80
+    TOWER_SAMPLE_MIN_HEIGHT_TILES = 0.09
+    TOWER_COLOUR_CONFIRM_FRAMES = 2
 
     def _learn_team_colours(self, grid: ArenaGrid) -> None:
-        """Work out which bar colour means ally and which means enemy, from the known towers.
+        """Learn a colour swap only from multiple plausible, consistent tower HP bars.
 
-        Which colour is "ours" is a frame-local fact, and it is not even stable across the game's
-        own screens: on one real capture our princess towers drew *red* bars while the enemy's
-        drew blue, so a fixed red=enemy rule reads every troop backwards (and that is exactly how
-        an enemy Mega Knight was being reported as an ally).
-
-        The six tower positions are known exactly from calibration, so the bars sitting on them
-        are sampled each frame and the colours that actually appear there become the answer. A
-        bar only counts as a tower's sample when its nearest tower is clearly the nearest one —
-        otherwise it is a troop fighting at that tower, whose colour says nothing about sides.
+        A bar near a tower is not necessarily the tower's: on the bundled real frame the former
+        4-tile rule sampled two BLUE allied troops on enemy towers and orange fence decorations
+        near our towers. It then flipped every team. Require outlined, substantial bars on at
+        least two different towers on *each* side, consistent red/blue clusters and the same
+        mapping on consecutive frames. Otherwise keep the reader's red/blue default (or the
+        last corroborated mapping), never infer a swap from scenery or a single unit.
         """
-        ally_samples: List[Tuple[float, float]] = []
-        enemy_samples: List[Tuple[float, float]] = []
+        samples: Dict[str, Dict[str, float]] = {"ally": {}, "enemy": {}}
+        ppt = max(1.0, float(pixels_per_tile(grid)))
         for bar in self.last_bars:
             hue = float(getattr(bar, "hue", -1.0))
-            if hue < 0:
+            x1, y1, x2, y2 = bar.bbox
+            if (hue < 0 or not getattr(bar, "has_outline", False)
+                    or (x2 - x1) < self.TOWER_SAMPLE_MIN_WIDTH_TILES * ppt
+                    or (y2 - y1) < self.TOWER_SAMPLE_MIN_HEIGHT_TILES * ppt):
                 continue
-            bx1, by1, bx2, by2 = bar.bbox
-            tx, ty = grid.pixel_to_tile(0.5 * (bx1 + bx2), 0.5 * (by1 + by2))
-            distances = sorted(
-                (math.hypot(tx - tower_x, ty - tower_y), name)
-                for name, (tower_x, tower_y) in grid.TOWER_TILES.items()
-            )
-            if not distances:
+            tx, ty = grid.pixel_to_tile(0.5 * (x1 + x2), 0.5 * (y1 + y2))
+            possible = []
+            for name, (tower_x, tower_y) in grid.TOWER_TILES.items():
+                dx, dy = tx - tower_x, ty - tower_y
+                distance = math.hypot(dx, dy)
+                if (distance <= self.TOWER_SAMPLE_RADIUS_TILES
+                        and dy <= self.TOWER_SAMPLE_MAX_BELOW_TILES):
+                    possible.append((distance, name))
+            if not possible:
                 continue
-            nearest_d, nearest_name = distances[0]
-            if nearest_d > self.TOWER_SAMPLE_RADIUS_TILES:
-                continue
-            if len(distances) > 1 and distances[1][0] < nearest_d * self.TOWER_SAMPLE_MARGIN:
-                continue
-            if nearest_name.startswith("ally"):
-                ally_samples.append((nearest_d, hue))
-            elif nearest_name.startswith("enemy"):
-                enemy_samples.append((nearest_d, hue))
-        if ally_samples and enemy_samples:
-            self._ally_hue = float(np.median([h for _d, h in ally_samples]))
-            self._enemy_hue = float(np.median([h for _d, h in enemy_samples]))
+            _distance, name = min(possible)
+            side = "ally" if name.startswith("ally") else "enemy"
+            samples[side][name] = hue
+
+        if len(samples["ally"]) < 2 or len(samples["enemy"]) < 2:
+            self._pending_colour_pair = None
+            self._pending_colour_frames = 0
+            return
+
+        def colour(hue: float) -> Optional[int]:
+            red, blue = _hue_distance(hue, 0.0), _hue_distance(hue, 105.0)
+            if min(red, blue) > 35.0 or abs(red - blue) < 15.0:
+                return None
+            return 0 if red < blue else 1
+
+        ally_colours = {colour(h) for h in samples["ally"].values()}
+        enemy_colours = {colour(h) for h in samples["enemy"].values()}
+        if (None in ally_colours or None in enemy_colours or len(ally_colours) != 1
+                or len(enemy_colours) != 1 or ally_colours == enemy_colours):
+            self._pending_colour_pair = None
+            self._pending_colour_frames = 0
+            return
+        pair = (next(iter(ally_colours)), next(iter(enemy_colours)))
+        if pair == self._pending_colour_pair:
+            self._pending_colour_frames += 1
+        else:
+            self._pending_colour_pair, self._pending_colour_frames = pair, 1
+        if self._pending_colour_frames >= self.TOWER_COLOUR_CONFIRM_FRAMES:
+            # Canonical circular hue centres avoid the 0/179 median discontinuity for red.
+            self._ally_hue = 0.0 if pair[0] == 0 else 105.0
+            self._enemy_hue = 0.0 if pair[1] == 0 else 105.0
 
     def _correct_side(self, reported: Side, hue: float) -> Side:
         """Prefer the learned team colour over the reader's fixed colour guess."""
-        if self._ally_hue is None or self._enemy_hue is None:
+        if hue < 0 or self._ally_hue is None or self._enemy_hue is None:
             return reported
         d_ally = _hue_distance(hue, self._ally_hue)
         d_enemy = _hue_distance(hue, self._enemy_hue)
@@ -496,38 +499,58 @@ class ArenaUnitBackend:
             return None
         return self._recognizer
 
-    #: how long (ms) naming may cost per frame before it is switched off again
+    #: The budget is soft: an individual synchronous matcher call cannot be pre-empted.
     RECOGNITION_BUDGET_MS = 40.0
+    MAX_RECOGNITIONS_PER_FRAME = 1
 
     def _name_troops(self, units: List[RawDetection], frame_bgr: np.ndarray) -> None:
-        """Replace ``unknown_*`` labels with card names where the evidence is convincing.
+        """Optionally name anonymous measured silhouettes, fairly across frames.
 
-        The recogniser already refuses anything below its score/margin floors, so the only job
-        here is to not spend the frame's budget on it. Naming is optional by design: an unnamed
-        troop still has a position, a side and a size class, which is enough to defend against;
-        a *wrongly* named one makes the brain pick the wrong counter.
+        A bars-only box is a guessed footprint, not a sprite crop, so it cannot safely be
+        classified. At most one expensive match runs per frame; rotate the starting unit so a
+        slow first call does not starve every other troop. The tracker preserves accepted names
+        between naming passes. Detection confidence remains independent of naming confidence.
         """
-        recognizer = self.recognizer
-        if recognizer is None:
-            return
-        anonymous = [unit for unit in units if unit.name.startswith("unknown_")]
+        anonymous = [u for u in units if u.name.startswith("unknown_")
+                     and u.source == "segmentation"]
         if not anonymous:
             return
+        try:
+            recognizer = self.recognizer
+        except Exception as exc:  # noqa: BLE001 - naming must never stop detection
+            logger.warning("sprite recognizer unavailable: %s", exc)
+            self._recognizer_failed = True
+            return
+        if recognizer is None:
+            return
+        start = self._naming_cursor % len(anonymous)
+        ordered = anonymous[start:] + anonymous[:start]
         started = time.perf_counter()
-        for unit in anonymous:
-            if 1000.0 * (time.perf_counter() - started) > self.RECOGNITION_BUDGET_MS:
-                logger.debug("naming budget exhausted with %d troop(s) still unnamed",
-                             len(anonymous))
+        attempted = 0
+        for unit in ordered:
+            if attempted >= self.MAX_RECOGNITIONS_PER_FRAME:
                 break
-            has_bar = self._bar_above(unit.pixel_bbox, self._last_ppt) is not None
-            found = recognizer.identify(frame_bgr, unit.pixel_bbox, has_bar=has_bar)
+            if attempted and 1000.0 * (time.perf_counter() - started) >= self.RECOGNITION_BUDGET_MS:
+                break
+            attempted += 1
+            bar = self._bar_above(unit.pixel_bbox, self._last_ppt)
+            x1, y1, x2, y2 = unit.pixel_bbox
+            has_bar = bool(bar and bar.bbox[0] < x2 and bar.bbox[2] > x1
+                           and bar.bbox[1] < y2 and bar.bbox[3] > y1)
+            try:
+                found = recognizer.identify(frame_bgr, unit.pixel_bbox, has_bar=has_bar)
+            except Exception as exc:  # noqa: BLE001 - keep the generic detection
+                logger.warning("sprite recognizer failed; leaving units unnamed: %s", exc)
+                self._recognizer_failed = True
+                break
             if found is None:
                 continue
             info = get_card_info(found.card)
             unit.name = found.card
-            if info is not None:
-                unit.weight_class = info.weight_class
-                unit.move_type = info.move_type
+            unit.source = "segmentation+sprite"
+            unit.weight_class = info.weight_class
+            unit.move_type = info.move_type
+        self._naming_cursor = (start + attempted) % len(anonymous)
 
     def _describe(self, unit: BlobUnit, frame_bgr: np.ndarray, grid: ArenaGrid) -> RawDetection:
         name = unit.fallback_label
@@ -544,7 +567,7 @@ class ArenaUnitBackend:
             if match is not None:
                 name = match.card
                 source = "segmentation+identity"
-                confidence = float(min(0.97, 0.55 + 0.45 * max(0.0, match.score)))
+                # Identity confidence does not make the underlying blob more real.
                 info = get_card_info(match.card)
                 if info is not None:
                     move_type = info.move_type
@@ -553,11 +576,13 @@ class ArenaUnitBackend:
 
         # The bar above a unit's head is the game's own statement of team. The sprite's own
         # colours are not reliable evidence -- a tower's blue level pill, an elixir puddle or a
-        # spell's glow all outvote them, which is how an enemy Mega Knight was reported as an ally.
+        # spell's glow can outvote the actual troop.
         side = unit.side
-        bar = self._bar_above(unit.bbox, ppt=pixels_per_tile(grid))
+        bar = next((b for b in unit.bars if getattr(b, "has_outline", False)), None)
+        if bar is None and unit.has_bar:
+            bar = self._bar_above(unit.bbox, ppt=pixels_per_tile(grid))
         if bar is not None:
-            side = self._correct_side(bar.side, float(getattr(bar, "hue", 0.0)))
+            side = self._correct_side(bar.side, float(getattr(bar, "hue", -1.0)))
 
         return RawDetection(
             name=name,
@@ -582,24 +607,16 @@ class ArenaUnitBackend:
 
     #: a sample is only stored when the detection is this well supported
     LEARN_MIN_CONFIDENCE = 0.80
-    #: only learn from our own units: we know what we deployed, so the label is verifiable
+    #: explicitly supplied verified labels must also be allied
     LEARN_SIDES = ("ally",)
 
     def _remember(self, detections: List[RawDetection], frame_bgr: np.ndarray,
                   grid: ArenaGrid) -> None:
-        """Learn a card's appearance — but only from detections whose *label is verified*.
+        """Learn only from explicitly verified deploy labels, never from detector guesses.
 
-        This used to store every confident detection, which turned a single mistake into a
-        permanent one: a Wizard read as a Musketeer was written into the library as a Musketeer
-        sample, and from then on the matcher agreed with the mistake. Worse, a detection that
-        already *came from* the library was fed straight back in, so a wrong label could
-        reinforce itself frame after frame.
-
-        The label is only trustworthy when we produced it ourselves: an **ally** unit is one the
-        bot just deployed, so its card is known from the hand, not guessed. Enemy detections are
-        never used as training data. On top of that the detection must be clean — full HP (no
-        damage tint or overlapping health bar) and strongly supported by the detector (a bar or
-        good segmentation).
+        Neither being an ally nor having high detection confidence verifies the card name.
+        The opt-in live runner learns separately after a verified hand change and a unique new
+        ally near the drop point. That spatial association is still only a heuristic. This hook accepts only an explicitly verified source.
         """
         if self.identity is None or not self.enable_identity:
             return
@@ -612,7 +629,7 @@ class ArenaUnitBackend:
                 continue
             if det.hp_ratio < 0.99:
                 continue      # damaged sprite: bar and damage flash pollute the patch
-            if det.source not in ("segmentation", "segmentation+identity"):
+            if det.source != "verified_deploy":
                 continue
             if self.identity.add_from_frame(det.name, frame_bgr, det.pixel_bbox):
                 self.learned_samples += 1
@@ -716,11 +733,11 @@ class ArenaUnitBackend:
             out.append(
                 RawDetection(
                     name=label,
-                    side=bar.side,
+                    side=self._correct_side(bar.side, float(getattr(bar, "hue", -1.0))),
                     tile_x=float(tx),
                     tile_y=float(ty),
                     pixel_bbox=(int(x1 - 0.5 * ppt), int(y2), int(x2 + 0.5 * ppt), int(foot_y)),
-                    confidence=0.45,
+                    confidence=self.BARS_ONLY_CONFIDENCE,
                     hp_ratio=round(float(bar.hp_ratio), 2),
                     move_type=MoveType.GROUND,
                     weight_class=weight,
@@ -789,8 +806,8 @@ class ArenaUnitBackend:
         """True when this *bar* belongs to a tower rather than to a troop.
 
         The old test was a plain 2.2-tile circle, which is wider than the gap between a tower
-        and the troop attacking it — so an enemy Mega Knight fighting at the princess tower was
-        silently discarded as "the tower's bar". The radius is now the tower's own footprint and
+        and a troop attacking it — so a troop fighting at a princess tower could be silently
+        discarded as "the tower's bar". The radius is now the tower's own footprint and
         the bar must be drawn at or above the crown, which is where the game puts it.
         """
         radius = cls.TOWER_BAR_RADIUS_TILES if radius_tiles is None else radius_tiles
@@ -835,6 +852,10 @@ class HybridArenaDetector:
     TRACK_TTL_SEC = 1.6
     #: a track that has not been seen for this long is reported with reduced confidence
     STALE_AFTER_SEC = 0.45
+    #: A bare bar can be a badge or an effect. Confirm it in two frames and keep it for less
+    #: time than a silhouette-backed track; this costs at most one frame of detection latency.
+    WEAK_TRACK_TTL_SEC = 0.75
+    WEAK_CONFIRM_HITS = 2
 
     def __init__(
         self,
@@ -844,22 +865,38 @@ class HybridArenaDetector:
         enable_opencv_fallback: bool = True,
         identity_memory: Optional["UnitIdentityMemory"] = None,
         enable_segmentation: bool = True,
+        enable_recognition: bool = True,
+        recognizer=None,
     ) -> None:
         self.grid = grid
         self.yolo = YOLOBackend(yolo_weights_path, conf_threshold=yolo_conf)
         self.cv_fallback = (
-            ArenaUnitBackend(identity_memory=identity_memory, enable_segmentation=enable_segmentation)
+            ArenaUnitBackend(identity_memory=identity_memory, enable_segmentation=enable_segmentation,
+                             enable_recognition=enable_recognition, recognizer=recognizer)
             if enable_opencv_fallback
             else None
         )
         self._tracks: Dict[int, DetectedUnit] = {}
+        self._track_hits: Dict[int, int] = {}
+        self._weak_only: Dict[int, bool] = {}
+        self._identity_authority: Dict[int, int] = {}
+        self._identity_votes: Dict[int, Tuple[str, int]] = {}
         self._next_track_id: int = 1
 
     def reset(self) -> None:
         self._tracks.clear()
+        self._track_hits.clear()
+        self._weak_only.clear()
+        self._identity_authority.clear()
+        self._identity_votes.clear()
         self._next_track_id = 1
         if self.cv_fallback is not None:
             self.cv_fallback.reset()
+
+    @property
+    def active_tracks(self) -> List[DetectedUnit]:
+        """Snapshot of all tracks, including tentative bars, for conservative scene checks."""
+        return list(self._tracks.values())
 
     def detect_and_track(self, frame_bgr: np.ndarray, now_ts: float) -> List[DetectedUnit]:
         yolo_dets = self.yolo.detect(frame_bgr, self.grid) if self.yolo.is_active else []
@@ -890,18 +927,22 @@ class HybridArenaDetector:
             if best_cv_idx is not None:
                 used_cv.add(best_cv_idx)
                 cd = cv_dets[best_cv_idx]
+                # A generic YOLO class must not erase a confident CV recognizer result.
+                use_cv_name = yd.name.startswith("unknown_") and not cd.name.startswith("unknown_")
+                named = cd if use_cv_name else yd
+                source = f"fused+{cd.source}" if use_cv_name else "fused"
                 merged.append(
                     RawDetection(
-                        name=yd.name,
+                        name=named.name,
                         side=yd.side,
                         tile_x=yd.tile_x,
                         tile_y=yd.tile_y,
                         pixel_bbox=yd.pixel_bbox,
                         confidence=yd.confidence,
                         hp_ratio=cd.hp_ratio,
-                        move_type=yd.move_type,
-                        weight_class=yd.weight_class,
-                        source="fused",
+                        move_type=named.move_type,
+                        weight_class=named.weight_class,
+                        source=source,
                     )
                 )
             else:
@@ -913,7 +954,27 @@ class HybridArenaDetector:
                 merged.append(cd)
         return merged
 
+    @staticmethod
+    def _identity_rank(source: str) -> int:
+        if source == "yolo" or source == "fused":
+            return 2
+        if "sprite" in source or "identity" in source:
+            return 1
+        return 0
+
+    def _drop_track(self, tid: int) -> None:
+        self._tracks.pop(tid, None)
+        self._track_hits.pop(tid, None)
+        self._weak_only.pop(tid, None)
+        self._identity_authority.pop(tid, None)
+        self._identity_votes.pop(tid, None)
+
     def _update_tracks(self, detections: List[RawDetection], now_ts: float) -> List[DetectedUnit]:
+        # Expire *before* association so a new unit cannot resurrect an old track ID.
+        for tid, tr in list(self._tracks.items()):
+            ttl = self.WEAK_TRACK_TTL_SEC if self._weak_only.get(tid, False) else self.TRACK_TTL_SEC
+            if now_ts - tr.last_seen_ts > ttl:
+                self._drop_track(tid)
         unmatched_tracks = set(self._tracks.keys())
         unmatched_dets = set(range(len(detections)))
 
@@ -938,6 +999,9 @@ class HybridArenaDetector:
 
             tr = self._tracks[tid]
             det = detections[didx]
+            self._track_hits[tid] = self._track_hits.get(tid, 1) + 1
+            if det.source != "bars":
+                self._weak_only[tid] = False
             dt = max(0.04, now_ts - tr.last_seen_ts)
             inst_vx = (det.tile_x - tr.tile_x) / dt
             inst_vy = (det.tile_y - tr.tile_y) / dt
@@ -953,20 +1017,38 @@ class HybridArenaDetector:
             tr.last_seen_ts = now_ts
             tr.source = det.source
 
-            # Preserve specific YOLO identity if fallback only returned generic `unknown_*`
+            # Keep a specific name across generic fallback frames. A lower-authority guessed
+            # name cannot overwrite YOLO, and a conflicting CV guess needs two observations.
             if not det.name.startswith("unknown_"):
-                tr.name = det.name
-                tr.move_type = det.move_type
-                tr.weight_class = det.weight_class
-            elif tr.name.startswith("unknown_"):
-                # Upgrade generic classification using observed speed/river crossing!
-                self._refine_generic_class(tr)
+                rank = self._identity_rank(det.source)
+                old_rank = self._identity_authority.get(tid, 0)
+                accept = tr.name.startswith("unknown_") or det.name == tr.name or rank > old_rank
+                if not accept and rank >= old_rank and rank > 0:
+                    previous, votes = self._identity_votes.get(tid, ("", 0))
+                    votes = votes + 1 if previous == det.name else 1
+                    self._identity_votes[tid] = (det.name, votes)
+                    accept = votes >= 2
+                if accept:
+                    tr.name = det.name
+                    tr.move_type = det.move_type
+                    tr.weight_class = det.weight_class
+                    self._identity_authority[tid] = max(old_rank, rank)
+                    self._identity_votes.pop(tid, None)
+            else:
+                # A rotating naming budget leaves intervening frames generic; retain a
+                # conflicting vote until another specific observation or track expiry.
+                if tr.name.startswith("unknown_"):
+                    self._refine_generic_class(tr)
 
         # Spawn new tracks for unmatched detections
         for didx in unmatched_dets:
             det = detections[didx]
             tid = self._next_track_id
             self._next_track_id += 1
+            self._track_hits[tid] = 1
+            self._weak_only[tid] = det.source == "bars"
+            self._identity_authority[tid] = (self._identity_rank(det.source)
+                                             if not det.name.startswith("unknown_") else 0)
             self._tracks[tid] = DetectedUnit(
                 track_id=tid,
                 name=det.name,
@@ -985,20 +1067,13 @@ class HybridArenaDetector:
                 source=det.source,
             )
 
-        # Expire stale tracks
-        expired = [
-            tid for tid, tr in self._tracks.items() if (now_ts - tr.last_seen_ts) > self.TRACK_TTL_SEC
-        ]
-        for tid in expired:
-            del self._tracks[tid]
-
         # Report live tracks; ones that were missed for a few frames stay in the board (so the
         # brain does not forget a push mid-fight) but are marked less certain.
         out: List[DetectedUnit] = []
-        for tr in self._tracks.values():
+        for tid, tr in self._tracks.items():
+            if self._weak_only.get(tid, False) and self._track_hits.get(tid, 0) < self.WEAK_CONFIRM_HITS:
+                continue  # a one-frame bar is tentative, not a threat yet
             missed = now_ts - tr.last_seen_ts
-            if missed > self.TRACK_TTL_SEC:
-                continue
             if missed > self.STALE_AFTER_SEC:
                 tr.confidence = round(max(0.2, tr.confidence * 0.92), 3)
                 # a stale track cannot be trusted to still be moving

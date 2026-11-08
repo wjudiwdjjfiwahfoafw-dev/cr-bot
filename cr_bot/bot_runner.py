@@ -16,6 +16,7 @@ Differences from the original loop, all of them aimed at actually playing on a r
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -38,8 +39,9 @@ from cr_bot.arena.device_calibrator import (
 from cr_bot.arena.grid import ArenaCalibration, ArenaGrid
 from cr_bot.brain.mk_zap_bait_brain import MKZapBaitBrain
 from cr_bot.brain.spell_targeting import aim_is_wasted, is_damage_spell, plan_cast
+from cr_bot.config.cards_db import CARDS_DB, get_card_info, normalize_card_name
 from cr_bot.config.loader import BotConfig
-from cr_bot.models import BattleState, BotAction, GamePhase
+from cr_bot.models import BattleState, BotAction, DetectedUnit, GamePhase, Side, WeightClass
 from cr_bot.perf import BRAIN, CAPTURE, HUD, SLEEP, VISION, FrameProfiler
 from cr_bot.ui.click_to_tap import ClickToTapController, ManualGesture, map_click_to_frame
 from cr_bot.ui.debug_hud import TacticalDebugHUD
@@ -68,6 +70,20 @@ class DeployOutcome:
     attempts: int
     elapsed_ms: float
     note: str = ""
+
+
+@dataclass
+class PendingIdentitySample:
+    """A verified play awaiting a unique, new ally on a frame from the vision loop."""
+
+    card_name: str
+    arena_xy: Tuple[int, int]
+    excluded_track_ids: frozenset[int]
+    expires_at: float
+    match_epoch: int
+    candidate_id: Optional[int] = None
+    observations: int = 0
+    last_observed_ts: float = -1.0
 
 
 class ClashRoyaleBotRunner:
@@ -125,7 +141,11 @@ class ClashRoyaleBotRunner:
 
         # Async deploy plumbing
         self._deploy_lock = threading.Lock()
-        self._pending_deploy: Optional[Tuple[BotAction, Tuple[int, int], Tuple[int, int]]] = None
+        self._pending_deploy: Optional[Tuple[BotAction, Tuple[int, int], Tuple[int, int],
+                                             Optional[frozenset[int]], int]] = None
+        self._learning_requests: List[PendingIdentitySample] = []
+        self._learned_track_ids: set[int] = set()
+        self._match_epoch = 0
         self._deploy_worker: Optional[threading.Thread] = None
         self._worker_stop = threading.Event()
         self._busy = False
@@ -146,6 +166,22 @@ class ClashRoyaleBotRunner:
         self._hud_shown_size = (0, 0)
 
     # -- vision stack ---------------------------------------------------------------
+    def _identity_namespace(self, grid: ArenaGrid) -> str:
+        # A hash avoids putting a raw device serial in a filename. Old namespaces may contain
+        # guessed labels; never load them. Separate devices and frame sizes do not share crops.
+        serial = str(self.adb.serial or "unresolved")
+        device = hashlib.sha256(serial.encode("utf-8")).hexdigest()[:12]
+        return f"{grid.width}x{grid.height}_{device}_guarded_v2"
+
+    def _refresh_identity_memory(self) -> None:
+        namespace = self._identity_namespace(self.grid)
+        if self.identity.namespace == namespace:
+            return
+        self.identity = UnitIdentityMemory(directory=self.cfg.identity_dir, namespace=namespace)
+        if self.arena_detector.cv_fallback is not None:
+            self.arena_detector.cv_fallback.identity = (
+                self.identity if self.cfg.enable_identity_learning else None)
+
     def _build_vision_stack(self, grid: ArenaGrid) -> None:
         cfg = self.cfg
         self.phase_detector = GameStateDetector(grid, tower_level=cfg.tower_level)
@@ -161,8 +197,7 @@ class ClashRoyaleBotRunner:
             grid, deck_cards=cfg.normalized_deck(), templates_dir=cfg.templates_dir
         )
         self.identity = UnitIdentityMemory(
-            directory=cfg.identity_dir,
-            namespace=f"{cfg.target_width}x{cfg.target_height}",
+            directory=cfg.identity_dir, namespace=self._identity_namespace(grid),
         )
         self.arena_detector = HybridArenaDetector(
             grid,
@@ -170,6 +205,7 @@ class ClashRoyaleBotRunner:
             yolo_conf=cfg.yolo_confidence,
             enable_opencv_fallback=cfg.enable_opencv_fallback,
             identity_memory=self.identity if cfg.enable_identity_learning else None,
+            enable_recognition=cfg.enable_unit_recognition,
         )
         self.brain = MKZapBaitBrain(grid, config=cfg, adb_latency_sec=cfg.adb_latency_sec)
         label = (
@@ -189,6 +225,10 @@ class ClashRoyaleBotRunner:
 
     # -- per-frame state ------------------------------------------------------------
     def reset_match_state(self, now_ts: float) -> None:
+        with self._deploy_lock:
+            self._match_epoch += 1
+            self._learning_requests.clear()
+            self._learned_track_ids.clear()
         self.elixir_reader.reset()
         self.opp_tracker.reset(now_ts)
         self.arena_detector.reset()
@@ -202,6 +242,7 @@ class ClashRoyaleBotRunner:
         h, w = frame_bgr.shape[:2]
         if (w, h) != (self.grid.width, self.grid.height):
             self.grid.resize(w, h)
+            self._refresh_identity_memory()
 
         raw_phase = self.phase_detector.detect_phase(frame_bgr, now_ts)
         phase = self.phase_stabilizer.update(raw_phase, now_ts)
@@ -213,6 +254,9 @@ class ClashRoyaleBotRunner:
         elif not phase.is_in_battle and self._was_in_battle:
             logger.info("=== Match ended (%s) ===", raw_phase.value)
             self._was_in_battle = False
+            with self._deploy_lock:
+                self._match_epoch += 1
+                self._learning_requests.clear()
             self.matches_played += 1
             self._calibrated_this_match = False
 
@@ -223,6 +267,8 @@ class ClashRoyaleBotRunner:
         hand = self.hand_detector.detect_hand(frame_bgr, elixir)
         towers = self.phase_detector.read_towers(frame_bgr)
         units = self.arena_detector.detect_and_track(frame_bgr, now_ts)
+        # Include tentative tracks in the ambiguity check even though the brain doesn't see them.
+        self._learn_from_frame(frame_bgr, self.arena_detector.active_tracks, now_ts)
         opp_state = self.opp_tracker.update(now_ts, phase, units)
 
         return BattleState(
@@ -312,9 +358,9 @@ class ClashRoyaleBotRunner:
             if job is None:
                 time.sleep(0.01)
                 continue
-            action, slot_xy, arena_xy = job
+            action, slot_xy, arena_xy, known_tracks, match_epoch = job
             try:
-                outcome = self._execute_deploy(action, slot_xy, arena_xy)
+                outcome = self._execute_deploy(action, slot_xy, arena_xy, known_tracks, match_epoch)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Deploy worker error: %s", exc)
                 outcome = DeployOutcome(action, False, "error", 0, 0.0, str(exc))
@@ -327,7 +373,8 @@ class ClashRoyaleBotRunner:
             self._busy = False
 
     def _execute_deploy(
-        self, action: BotAction, slot_xy: Tuple[int, int], arena_xy: Tuple[int, int]
+        self, action: BotAction, slot_xy: Tuple[int, int], arena_xy: Tuple[int, int],
+        known_tracks: Optional[frozenset[int]] = None, match_epoch: Optional[int] = None,
     ) -> DeployOutcome:
         t0 = time.monotonic()
         before = self._hand_snapshot()
@@ -344,14 +391,20 @@ class ClashRoyaleBotRunner:
             if not self.verify_deploys or before is None:
                 elapsed = (time.monotonic() - t0) * 1000.0
                 return DeployOutcome(action, result.ok, result.backend, attempts, elapsed, last_note)
+            if not result.ok:
+                # An unrelated hand change must not turn a failed input into a verified play.
+                logger.warning("  deploy input for %s failed via %s", action.card_name, backend)
+                if attempts > self.deploy_retries:
+                    break
+                continue
 
             if self._wait_for_hand_change(action.slot_index, before):
                 elapsed = (time.monotonic() - t0) * 1000.0
                 logger.info(
                     "  verified %s via %s in %.0f ms", action.card_name, result.backend, elapsed
                 )
-                if self.cfg.enable_identity_learning:
-                    self._learn_deployed_unit(action.card_name, arena_xy)
+                if self.cfg.enable_identity_learning and known_tracks is not None:
+                    self._queue_identity_sample(action.card_name, arena_xy, known_tracks, match_epoch)
                 return DeployOutcome(action, True, result.backend, attempts, elapsed, last_note)
 
             logger.warning(
@@ -363,41 +416,105 @@ class ClashRoyaleBotRunner:
         elapsed = (time.monotonic() - t0) * 1000.0
         return DeployOutcome(action, False, self.adb.input_backend, attempts, elapsed, last_note)
 
-    def _learn_deployed_unit(self, card_name: str, arena_xy: Tuple[int, int], budget_s: float = 1.4) -> bool:
-        """File a real sprite sample for a troop the bot *knows* it just played.
+    def _queue_identity_sample(self, card_name: str, arena_xy: Tuple[int, int],
+                               known_tracks: frozenset[int], match_epoch: Optional[int],
+                               budget_s: float = 1.4) -> bool:
+        """Queue a verified play; actual sampling happens on the main vision thread.
 
-        ``DeployVerifier`` has already proved the card left the hand, so whatever appears at the
-        drop point is this card. That is exact supervision with no human labelling and no model
-        training: it just records what this device draws, and later lets the detector name both
-        our own and the opponent's copies of that troop.
+        A changed hand confirms a play, not that the nearest blob is the played card. Spells,
+        buildings, pre-existing tracks, ambiguous groups and conflicting labels are excluded.
+        The worker must never run the stateful segmenter concurrently with the vision loop.
         """
-        learn = getattr(self, "identity", None)
-        if learn is None:
+        card = normalize_card_name(card_name)
+        if card not in CARDS_DB:
             return False
-        deadline = time.monotonic() + budget_s
-        while time.monotonic() < deadline:
-            frame = self.adb.capture_frame(timeout=0.2)
-            if frame is None:
-                time.sleep(0.05)
+        info = get_card_info(card)
+        # Multiple-unit cards and spells that spawn troops cannot provide a single-card crop.
+        multiple_units = {"archers", "elite_barbarians", "royal_hogs", "wall_breakers"}
+        if (card.startswith("unknown_") or info.is_spell or
+                info.weight_class in (WeightClass.BUILDING, WeightClass.SWARM) or
+                card in multiple_units):
+            return False
+        request = PendingIdentitySample(card, arena_xy, known_tracks,
+                                        time.monotonic() + max(0.0, budget_s),
+                                        self._match_epoch if match_epoch is None else match_epoch)
+        with self._deploy_lock:
+            if request.match_epoch != self._match_epoch or not self._was_in_battle:
+                return False
+            self._learning_requests.append(request)
+        return True
+
+    def _learn_from_frame(self, frame: np.ndarray, units: List[DetectedUnit], now_ts: float) -> None:
+        """Sample only one new, clean allied silhouette close to the verified drop point."""
+        if self.identity is None or not self.cfg.enable_identity_learning:
+            return
+        with self._deploy_lock:
+            requests, self._learning_requests = self._learning_requests, []
+            epoch = self._match_epoch
+        if not requests:
+            return
+        remaining: List[PendingIdentitySample] = []
+        radius = 2.2 * self._px_per_tile()
+        for request in requests:
+            if request.match_epoch != epoch or time.monotonic() > request.expires_at:
                 continue
-            self.grid.resize(frame.shape[1], frame.shape[0])
-            detections = self.arena_detector.cv_fallback.detect(frame, self.grid) \
-                if self.arena_detector.cv_fallback is not None else []
-            best = None
-            best_d = 1e9
-            for det in detections:
-                cx = 0.5 * (det.pixel_bbox[0] + det.pixel_bbox[2])
-                cy = 0.5 * (det.pixel_bbox[1] + det.pixel_bbox[3])
-                dist = ((cx - arena_xy[0]) ** 2 + (cy - arena_xy[1]) ** 2) ** 0.5
-                if dist < best_d:
-                    best, best_d = det, dist
-            if best is not None and best_d <= 2.2 * self._px_per_tile():
-                if learn.add_from_frame(card_name, frame, best.pixel_bbox):
-                    logger.info("  learned a sprite sample for %s (%d total)",
-                                card_name, learn.sample_count)
-                return True
-            time.sleep(0.08)
-        return False
+            nearby = []
+            for unit in units:
+                if now_ts - unit.last_seen_ts > 0.15:
+                    continue  # a stale tracked box cannot supervise a new sample
+                cx, cy = self._unit_point(unit)
+                if ((cx - request.arena_xy[0]) ** 2 + (cy - request.arena_xy[1]) ** 2) ** 0.5 <= radius:
+                    nearby.append(unit)
+            if len(nearby) != 1:
+                request.candidate_id = None
+                request.observations = 0
+                remaining.append(request)
+                continue
+            unit = nearby[0]
+            x1, y1, x2, y2 = unit.pixel_bbox
+            clean = (x2 > x1 and y2 > y1 and unit.side == Side.ALLY
+                     and unit.track_id not in request.excluded_track_ids
+                     and unit.track_id not in self._learned_track_ids
+                     and unit.source.startswith("segmentation") and unit.confidence >= 0.65
+                     and unit.hp_ratio >= 0.99
+                     and (unit.name.startswith("unknown_") or unit.name == request.card_name))
+            if not clean:
+                request.candidate_id = None
+                request.observations = 0
+                remaining.append(request)
+                continue
+            if request.candidate_id != unit.track_id:
+                request.candidate_id = unit.track_id
+                request.observations = 0
+                request.last_observed_ts = -1.0
+            if now_ts > request.last_observed_ts:
+                request.observations += 1
+                request.last_observed_ts = now_ts
+            if request.observations < 2:
+                remaining.append(request)
+                continue
+            # One track may not supervise two different plays, even when crops are duplicates.
+            self._learned_track_ids.add(unit.track_id)
+            if self.identity.add_from_frame(request.card_name, frame, unit.pixel_bbox, pad=0.0):
+                try:
+                    self.identity.save()
+                except OSError as exc:
+                    logger.warning("could not persist identity memory: %s", exc)
+                logger.info("  learned heuristic %s sample after verified play (%d total)",
+                            request.card_name, self.identity.sample_count)
+                if self.arena_detector.cv_fallback is not None:
+                    self.arena_detector.cv_fallback.learned_samples += 1
+        if remaining:
+            with self._deploy_lock:
+                # The match could have ended while this frame was processed.
+                self._learning_requests.extend(r for r in remaining if r.match_epoch == self._match_epoch)
+
+    def _unit_point(self, unit: DetectedUnit) -> Tuple[float, float]:
+        x1, y1, x2, y2 = unit.pixel_bbox
+        if x2 > x1 and y2 > y1:
+            return ((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+        # Unknown boxes still make a location ambiguous; don't silently ignore a nearby enemy.
+        return self.grid.tile_to_pixel(unit.tile_x, unit.tile_y)
 
     def _px_per_tile(self) -> float:
         from cr_bot.vision.unit_detector import pixels_per_tile
@@ -411,8 +528,9 @@ class ClashRoyaleBotRunner:
         frame = self.adb.capture_frame(timeout=0.2)
         if frame is None:
             return None
-        self.grid.resize(frame.shape[1], frame.shape[0])
-        return self.verifier.snapshot(frame, self.grid)
+        # The worker must not resize the grid being read by the main vision thread.
+        snapshot_grid = ArenaGrid(frame.shape[1], frame.shape[0], self.grid.cal)
+        return self.verifier.snapshot(frame, snapshot_grid)
 
     def _wait_for_hand_change(self, slot: int, before: SlotSnapshot, timeout: float = 1.1) -> bool:
         deadline = time.monotonic() + timeout
@@ -421,8 +539,8 @@ class ClashRoyaleBotRunner:
             if frame is None:
                 time.sleep(0.02)
                 continue
-            self.grid.resize(frame.shape[1], frame.shape[0])
-            after = self.verifier.snapshot(frame, self.grid)
+            snapshot_grid = ArenaGrid(frame.shape[1], frame.shape[0], self.grid.cal)
+            after = self.verifier.snapshot(frame, snapshot_grid)
             if after is not None and self.verifier.slot_changed(before, after, slot):
                 return True
             time.sleep(0.03)
@@ -454,8 +572,23 @@ class ClashRoyaleBotRunner:
                 logger.info("Skipped wasted %s: %s", action.card_name, why)
                 return False
 
+        # The state is the pre-deploy snapshot. Without it we cannot prove a nearby track is new,
+        # so that deploy may still execute but must not train the appearance memory.
+        known_tracks = None
+        if state is not None:
+            # Include tentative bars: the brain filters these out, but they make a scene unsafe
+            # for automatic labelling. Use the pre-deploy state and the latest tracker snapshot.
+            seen = {u.track_id: u for u in state.units}
+            seen.update({u.track_id: u for u in self.arena_detector.active_tracks})
+            known_tracks = frozenset(seen)
+            radius = 2.2 * self._px_per_tile()
+            for unit in seen.values():
+                cx, cy = self._unit_point(unit)
+                if ((cx - arena_xy[0]) ** 2 + (cy - arena_xy[1]) ** 2) ** 0.5 <= radius:
+                    known_tracks = None
+                    break
         with self._deploy_lock:
-            self._pending_deploy = (action, slot_xy, arena_xy)
+            self._pending_deploy = (action, slot_xy, arena_xy, known_tracks, self._match_epoch)
         self._busy = True
         self._start_deploy_worker()
         return True
@@ -542,6 +675,10 @@ class ClashRoyaleBotRunner:
     # -- main loop -------------------------------------------------------------------
     def run_forever(self, max_matches: Optional[int] = None) -> None:
         self.adb.connect()
+        # Auto-selected serial and actual capture size are known only after connecting.
+        if all(self.adb.frame_size):
+            self.grid.resize(*self.adb.frame_size)
+        self._refresh_identity_memory()
         if not self.hand_detector.has_templates:
             logger.warning(
                 "No card templates found in '%s'. Run `python scripts/capture_templates.py` "

@@ -101,8 +101,11 @@ def test_opencv_healthbar_detector_and_velocity_tracking() -> None:
     # a bar as the game draws it: bright fill inside a dark capsule
     cv2.rectangle(f1, (px1 - 20, py1 - 31), (px1 + 20, py1 - 21), (32, 32, 36), -1)
     cv2.rectangle(f1, (px1 - 18, py1 - 29), (px1 + 18, py1 - 23), (20, 20, 245), -1)
-    units_t1 = detector.detect_and_track(f1, now_ts=1.0)
+    # A bar without a silhouette is tentative on the first frame, then confirmed.
+    assert detector.detect_and_track(f1, now_ts=1.0) == []
+    units_t1 = detector.detect_and_track(f1, now_ts=1.05)
     assert len(units_t1) == 1
+    track_id = units_t1[0].track_id
     assert units_t1[0].side == Side.ENEMY
     assert abs(units_t1[0].tile_x - 3.5) < 0.4
     assert abs(units_t1[0].tile_y - 17.5) < 0.5
@@ -114,7 +117,7 @@ def test_opencv_healthbar_detector_and_velocity_tracking() -> None:
     cv2.rectangle(f2, (px2 - 18, py2 - 29), (px2 + 18, py2 - 23), (20, 20, 245), -1)
     units_t2 = detector.detect_and_track(f2, now_ts=1.5)
     assert len(units_t2) == 1
-    assert units_t2[0].track_id == units_t1[0].track_id
+    assert units_t2[0].track_id == track_id
     assert units_t2[0].vy > 0.8  # Moving downward toward our Princess Tower!
 
 

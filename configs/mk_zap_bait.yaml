@@ -86,6 +86,8 @@ vision:
   yolo_weights_path: "weights/clash_yolov8n.onnx"   # Optional; auto-falls back to OpenCV
   yolo_confidence: 0.42
   enable_opencv_fallback: true
+  unit_recognition: true    # Conservative sprite naming; false keeps all CV troops generic
+  identity_learning: false # Experimental: opt in to heuristic, persistent deployment samples
 
 tactics:
   tower_level: 11

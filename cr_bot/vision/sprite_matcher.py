@@ -30,10 +30,9 @@ Honest expectations
 -------------------
 Even with real game frames, a shipped template library recognises a *different* device's sprites
 only when pose and scale line up; measured on the sample frame the shipped frames are not
-trustworthy on their own.  The reliable path is
-:class:`cr_bot.vision.unit_identity.UnitIdentityMemory`, which learns the sprites the device
-actually shows (labelled for free by the bot's own verified deploys) and then matches against
-those.  This module is the scoring engine both use.
+trustworthy on their own. :class:`cr_bot.vision.unit_identity.UnitIdentityMemory` can match
+locally labelled crops, but automatic labelling from deployments is heuristic, optional and
+disabled by default; it does not establish accuracy on an opponent's different pose or tint.
 """
 
 from __future__ import annotations
@@ -351,7 +350,7 @@ class SpriteMatcher:
 
         Every card is fitted into the same box (aspect preserved), with a small sub-pixel offset
         and scale search.  Because nothing is allowed to drift to a different part of the frame,
-        a low-detail template can no longer win by accident.
+        this reduces, but does not eliminate, lucky matches to low-detail templates.
         """
         x1, y1, x2, y2 = [int(round(v)) for v in bbox]
         x1, y1 = max(0, x1), max(0, y1)

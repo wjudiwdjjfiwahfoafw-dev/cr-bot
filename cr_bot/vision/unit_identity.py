@@ -1,30 +1,21 @@
-"""Learn which troop is which from the bot's *own verified deploys* — no training, no labelling.
+"""Optional per-device appearance memory for locally labelled troop crops.
 
-The idea
---------
-The bot already knows, with certainty, what it played and where: ``BotRunner`` places a card and
-``DeployVerifier`` proves the card left the hand and that pixels changed at the drop point.  A
-couple of frames later the troop is standing right there.  Cropping that blob and filing it under
-the card's name gives an **exactly labelled, real-sprite sample** for free.
+A high-confidence template match can name a later, visually similar crop, but the correlation
+is not a calibrated probability and cannot reliably bridge arbitrary poses, tints or backgrounds.
+The library abstains when score/margin gates fail; an empty library leaves units generic.
 
-Do that a handful of times per card and the bot can recognise its own units, and — because the
-opponent's units are drawn with the same model and animation set, only tinted differently — match
-enemy troops against the same library.  Nothing is trained: the "model" is a small set of crops
-from this exact device, screen resolution and UI language.
-
-Properties that make this safe to ship
---------------------------------------
-* Pure numpy; samples are a few kB of PNG per card.
-* :meth:`UnitIdentityMemory.match` returns ``None`` when it is unsure (score or margin below the
-  thresholds), so the caller keeps the size-based fallback label instead of a confident guess.
-* Samples are keyed by ``(game, resolution)`` so switching devices cannot poison the library.
-* The library is optional: with no samples the bot still detects, counts and locates troops.
+The bot's experimental, opt-in online learner only uses a verified hand change followed by a
+unique, new allied segmentation track near the drop over two frames. This is a *heuristic*, not
+human-verified ground truth: missed units, effects and spawned troops can still contaminate it.
+It is disabled by default. Samples from older, less guarded versions use a different namespace.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -75,7 +66,7 @@ class IdentityMatch:
 
 
 class UnitIdentityMemory:
-    """Persistent card -> real-sprite-sample library, grown from verified deploys."""
+    """Persistent card -> crop library; callers are responsible for label quality."""
 
     def __init__(
         self,
@@ -113,9 +104,13 @@ class UnitIdentityMemory:
                     card, _, idx = key.partition("__")
                     if not card or not idx.isdigit():
                         continue
-                    self._samples.setdefault(card, []).append(np.asarray(data[key], dtype=np.float32))
-                for card, samples in self._samples.items():
-                    samples.sort(key=lambda s: s.shape)
+                    sample = np.asarray(data[key], dtype=np.float32)
+                    if sample.shape != (PATCH_SIZE[1], PATCH_SIZE[0]) or not np.isfinite(sample).all():
+                        logger.warning("ignoring invalid identity sample %s in %s", key, self.path)
+                        continue
+                    bucket = self._samples.setdefault(card, [])
+                    if len(bucket) < self.max_samples_per_card:
+                        bucket.append(sample)
         except Exception as exc:  # pragma: no cover - corrupt file should never break the bot
             logger.warning("could not read identity memory %s (%s); starting empty", self.path, exc)
             self._samples.clear()
@@ -129,7 +124,17 @@ class UnitIdentityMemory:
                 arrays[f"{card}__{i}"] = sample
         arrays["cards"] = np.array(json.dumps(sorted(self._samples)), dtype="U")
         arrays["stats"] = np.array(json.dumps(self._stats, sort_keys=True), dtype="U")
-        np.savez_compressed(self.path, **arrays)
+        # Never replace a usable library with a partially written zip after a crash or I/O error.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix=f".{self.namespace}.", suffix=".npz",
+                                             dir=self.directory, delete=False) as handle:
+                temporary = Path(handle.name)
+                np.savez_compressed(handle, **arrays)
+            os.replace(temporary, self.path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         return self.path
 
     # -- learning ------------------------------------------------------------------
@@ -183,7 +188,8 @@ class UnitIdentityMemory:
             if not samples:
                 continue
             best = max(patch_similarity(sample, patch) for sample in samples)
-            scored.append((best, card))
+            if np.isfinite(best):
+                scored.append((best, card))
         if not scored:
             return None
         scored.sort(reverse=True)

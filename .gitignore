@@ -6,3 +6,6 @@ venv/
 weights/
 *.onnx
 *.pt
+
+# Device-specific, heuristic appearance memories (not source assets)
+assets/unit_identity/

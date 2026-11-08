@@ -4,15 +4,14 @@ A modular, real-time Clash Royale AI bot that plays **on a real Android device o
 (a phone, or BlueStacks / LDPlayer / MEmu / MuMu), using a **Hybrid YOLOv8/ONNX + OpenCV
 vision pipeline**, a **utility-scoring & combo-sequencing brain** tuned for the **3.3 Elixir
 Mega Knight Zap Bait** deck, and — this is what v2.1 and v2.2 rebuilt — a **capture, touch and
-troop-detection layer that actually works on hardware**.
+troop-detection layer intended for hardware**.
 
 * **v2.1** — capture via `MultiClient`, drag-based touch injection over the scrcpy control socket,
   measured per-device homography calibration, verified deploys.
-* **v2.2** — troop detection that works on the *real* sprites: background segmentation instead of
-  colour strips, tile-relative geometry instead of emulator constants, real in-game animation
-  frames instead of front-facing promo renders, and a **self-supervised identity memory** that
-  learns card names from the bot's own verified deploys. Still no training, no annotation, no new
-  dependencies. Hand-card recognition on the sample device frame went from 1/4 to 4/4.
+* **v2.2** — foreground segmentation, tile-relative geometry and optional sprite matching.
+  Card naming is conservative and currently unproven on real gameplay: the 55 labelled real
+  crops in our check produced **0 correct names, 0 wrong names and 55 abstentions**. The
+  deployment-based identity memory is experimental and disabled by default.
 
 | Card | Cost | Tactical Role in the Brain |
 | :--- | :---: | :--- |
@@ -181,7 +180,7 @@ cr-bot/
 │   ├── vision/
 │   │   ├── arena_detector.py      # detector facade: segmentation + bars + identity + tracker
 │   │   ├── unit_detector.py       # background model, blob segmentation, bars, size classes
-│   │   ├── unit_identity.py       # self-supervised card identity memory (from verified deploys)
+│   │   ├── unit_identity.py       # optional local identity memory (heuristic learning is opt-in)
 │   │   ├── sprite_matcher.py      # masked-ZNCC matching against real in-game sprite frames
 │   │   ├── game_state.py          # phases, 1x/2x/3x, 6-tower HP
 │   │   ├── elixir_tracker.py      # continuous elixir fill reader + opponent cycle
@@ -324,89 +323,75 @@ python scripts/check_capture.py --seconds 6
 
 ---
 
-## Troop detection on real sprites (no training, no labelling)
+## Troop detection and naming
 
-The v2.2 target was: *recognise the troops that are actually on the arena, on a real device, without
-training or annotating anything locally.* That turned out to be two separate problems, and only one
-of them is a matching problem.
+Finding a silhouette and naming its card are separate problems. The OpenCV path can keep a generic
+`unknown_*` detection when naming is uncertain; its behaviour on real streams still needs validation.
 
 ### 1. Finding troops — segmentation, not colour thresholds
 
-The arena is a **static scene**: floor, bridges, towers and chests never move, only troops do. So
-the bot keeps a running model of the floor and thresholds the difference
+The arena floor is mostly static, although towers, effects, camera motion and the HUD can change.
+The bot keeps a running model of the floor and thresholds the difference
 (`cr_bot/vision/unit_detector.py`):
 
 ```
 frame ──► ArenaBackgroundModel.foreground() ──► morphology ──► blobs ──► tile-space unit
           (selective update:                                    │
-           stationary troops are never absorbed)                ├─ bbox        → size class (tiles)
+           attempts to protect stationary troops)                ├─ bbox        → size class (tiles)
                                                                 ├─ mean tint  → side (blue = you)
                                                                 ├─ foot point → tile (x, y)
                                                                 └─ nearby bar → HP fraction
 ```
 
-Why this beats the old colour-strip detector:
+The pipeline uses tile-relative geometry, health-bar evidence and a foreground silhouette where
+available. It confirms bar-only tracks across two frames and uses a shorter time-to-live for them.
+These checks reduce certain false positives but can also delay or miss units. Geometry, HP, side
+and performance have not been established across phones or live matches.
 
-* **Nothing is hard-coded in pixels.** Every limit is expressed in *tiles* through the calibrated
-  projection, so 720p, 1080p and 1440p captures behave identically. The old code assumed a 720p
-  emulator (`foot_y = bar_y + 26`, bar widths `>= 48/28/18`) and simply drifted on a phone.
-* **The arena floor stops generating false positives.** A loose red/blue threshold matches grass,
-  the river, bridge planks and tower roofs; frame differencing does not.
-* **You get a real bounding box**, so size (→ `swarm / light / medium / heavy`) and position come
-  from the sprite itself instead of being guessed from a health bar's width.
-* Cost is ~9 ms/frame at 720x1280, because segmentation runs on a half-resolution copy of the arena.
+![Detector output on the labelled sample](samples/annotated/calibration_preview_scored.png)
 
-Health bars are still read, but only to refine **side** and **HP fraction** — and with their dark
-outline required, and their geometry in tiles (`HealthBarReader`), rather than as the detector.
+*The sample is a single training-camp still scored after warming on an **inpainted** background.
+Three labelled locations are found with the visible team colours (Giant enemy, Mega Knight and
+partially occluded Miner allied); all are unnamed. Labels may be incomplete and this is not
+live-stream recall. See [verification details](docs/SCREENSHOT_VERIFICATION.md).*
 
-![Detector output on the sample device frame](docs/detection_on_device_frame.png)
+### 2. Naming troops — conservative and optional
 
-*`scripts/inspect_detection.py` on the sample 720x1280 frame: four troops segmented, each boxed with
-side, height class, HP and tile position. The Mega Knight on the right lane is correctly attributed
-to **ally** because its health bar (cyan) is matched to its box; the Giant on the left is **enemy**
-(red bar), 4.6 tiles tall, i.e. a heavy tank. Run the same command with `--serial <your device>` to
-see this live on your phone.*
+`ArenaUnitBackend` invokes `UnitRecognizer` on measured, anonymous foreground boxes and preserves
+accepted names through the tracker. It does not classify guessed bar-only boxes. A round-robin
+scheduler attempts at most one box per frame; its 40 ms budget is **soft**, because a synchronous
+match cannot be pre-empted. The first use also loads the sprite library. Set
+`vision.unit_recognition: false` to skip sprite matching entirely.
 
-### 2. Naming troops — match *the game's* art, or learn it from the device
+The matcher compares extracted in-game sprites using masked correlation, but real poses, tints,
+backgrounds and occlusion differ from those templates. It requires a score and margin, sufficient
+box coverage and an independent runner-up; byte-identical art shared by different cards is treated
+as ambiguous. These gates are not calibrated probabilities and cannot guarantee correctness.
 
-This is where the honest answer matters. The obvious reference set — the promo renders at
-`cdn.royaleapi.com/static/img/cards/<slug>.png` — **does not work**. Those are front-facing studio
-shots; the arena draws small, top-down, team-tinted animation frames. Measured on the two units of
-the sample device frame whose identity is known (Mega Knight on the right lane, Giant on the left),
-the correct card ranked **34 of 78** — chance — across grayscale ZNCC, edge ZNCC, CLAHE variants,
-sliding and fixed-window matching. No score tuning fixes a pose mismatch, so that library was
-deleted instead of being shipped.
-
-Two things replace it:
-
-**Real in-game animation frames** (`scripts/fetch_game_sprites.py` → `assets/unit_sprites/`).
-Supercell pre-renders every animation, and the decrypted `*_tex.sc` dumps are public. The script
-downloads a spread of frames per character, rejects attack-arc effects, detached limbs and clipped
-cells by silhouette statistics, then keeps a diverse subset (farthest-point sampling) — 53 cards,
-~8 poses each, both team tints, 4.7 MB, all committed. `SpriteMatcher` scores them with an exact
-**masked ZNCC** (`cr_bot/vision/sprite_matcher.py`); on a *known* bounding box every card competes
-for the same box, which is far more discriminative than free sliding.
-
-**Self-supervised identity memory** (`cr_bot/vision/unit_identity.py` → `assets/unit_identity/`).
-The bot already knows, with certainty, which card it just played and where: the deploy was verified
-by re-inspecting the hand. So a second later it crops whatever troop is standing at the drop point
-and files it under that card's name in `UnitIdentityMemory`. That is **exactly labelled, real-sprite
-data for free** — no annotation, no training, no GPU; the "model" is a handful of 40x48 crops from
-*this* device, resolution and UI language. Because the opponent's copy of a troop is the same model
-tinted red, the samples also recognise enemy units. `match()` returns `None` when the score or the
-margin is weak, so the bot falls back to the size-based `unknown_*` label instead of guessing.
-
-Practical consequence: identity starts at "unknown, medium, 2.4 tiles tall, enemy, left lane" — which
-is already what the brain consumes to choose a counter — and sharpens into card names over the first
-match or two. To seed it faster, play a couple of matches with the same deck.
+On 55 small, imperfectly labelled real-gameplay crops from 15 screenshots, the old matcher made
+**3 wrong predictions and 52 abstentions**; the current matcher made **0 wrong predictions and
+55 abstentions**. That reduces the observed false names but demonstrates **no usable real-crop
+naming recall**. A separate positive test pastes an existing template onto an arena to confirm
+that a successful recognition reaches the tracker; it is a synthetic integration test, not evidence
+of live-match accuracy. See [the benchmark and its attribution](tests/fixtures/real_unit_crops/README.md).
 
 ```bash
-python3 scripts/fetch_game_sprites.py --contact-sheet   # rebuild the sprite library (network)
-python3 scripts/fetch_card_assets.py                    # portraits + hand-slot templates
+python tools/recognition_benchmark.py --group additional --verbose
+python tools/verify_screenshots.py samples/calibration_preview.png --no-naming
+python -m pytest -q
 ```
 
-Set `vision.identity_learning: false` in the config to disable learning; delete
-`assets/unit_identity/` to forget everything.
+`vision.identity_learning: true` opts into experimental per-device `UnitIdentityMemory` sampling.
+A verified hand change is followed by a unique new allied segmentation track near an otherwise
+empty drop point, observed twice; spells, buildings, multi-unit cards and ambiguous scenes are
+skipped. Matching is performed and samples saved on the vision thread, not the deploy worker.
+Even so, the spatial association may be wrong when vision misses an object: samples are **not
+human-verified labels**, and accuracy across poses or opponents is unproven. The new namespace
+ignores potentially contaminated memories from previous versions. Delete `assets/unit_identity/`
+to forget samples.
+
+An optional trained YOLO model can provide another source of names; validate any model and its
+class mapping on your own gameplay before relying on it.
 
 ### 3. Hand cards — the old templates were the problem
 
@@ -419,7 +404,7 @@ deck it is actually playing before applying deck elimination. On the same frame:
 
 ### Optional: YOLOv8 troop recognition
 
-Segmentation + identity learning needs no weights at all. If you *do* have a Clash Royale YOLO
+The OpenCV and optional identity-memory paths need no YOLO weights. If you *do* have a Clash Royale YOLO
 model, `HybridArenaDetector` will fuse it: drop it at `weights/clash_yolov8n.onnx` (with a matching
 `.names` file) or pass `--yolo-weights path/to/best.pt`. It is not required, and training one is not
 part of the workflow this repo recommends.
@@ -467,7 +452,7 @@ Re-run with `python scripts/run_benchmark.py`, then open `benchmark_report.html`
 ```bash
 pytest -v
 ```
-59 tests: scrcpy protocol layout, coordinate mapping, backend escalation, projection
+The suite covers scrcpy protocol layout, coordinate mapping, backend escalation, projection
 (incl. perspective round-trip), calibration serialisation, deploy verification, elixir
 reading, background segmentation, tile-relative size classes, health-bar reading at multiple
 resolutions, masked ZNCC, identity-memory learning/persistence/namespacing, hand templates,
@@ -481,4 +466,5 @@ battle frame — and assert measured facts rather than renderer assumptions:
   `HandCardDetector` must return exactly that;
 * a troop pasted into the arena must be segmented at the right place, with the right side and a
   height-derived weight class, and must keep being detected after it stops moving;
-* a troop the bot has "deployed" must become recognisable by name once a sample has been filed.
+* optional identity memory can match an explicitly supplied sample, while ambiguous automatic
+  learning is rejected. This does not prove generalisation to a different pose or device.

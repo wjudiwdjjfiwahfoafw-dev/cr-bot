@@ -1,104 +1,37 @@
-# This round: what changed, and how it was verified
+# Current vision changes
 
-All four complaints from the real-device runs (SM-A528B, Android 16, 1080x2400 → 720x1600) were
-reproduced against the sample device frame shipped in the repo, then fixed, then measured.
+The detector already had an invocation of `UnitRecognizer`; this revision repairs and tests the
+end-to-end path rather than adding a second call. The recognizer now only examines measured
+segmentation boxes, schedules one attempt per frame with round-robin fairness, and rejects low
+scores, small partial matches, missing independent competitors and shared artwork. YOLO/OpenCV
+fusion and tracking preserve supported names without turning a single conflicting OpenCV guess
+into an immediate identity switch. `vision.unit_recognition: false` turns this pass off.
 
-`python -m pytest -q` → **209 passed**. `python tools/vision_benchmark.py` → recall **100 %**,
-false positives **0.00/frame**, duplicates **0.00/frame**, side **100 %**, **~21 ms/frame**.
+Real screenshot inspection showed that the old tower-hue calibration had learned from troops and
+scenery and inverted the sample's team labels. Calibration now requires corroborated outlined tower
+bars and resets between matches. Bar-only tracks require two hits and expire sooner. Detection
+confidence is no longer increased merely because a classifier returned a name.
 
----
+Automatic appearance learning is now **disabled by default**. When explicitly enabled, a verified
+hand change queues a candidate for the main vision thread. It excludes spells, buildings and
+multi-unit cards, requires an empty prior drop neighbourhood and a unique, new, high-confidence
+allied segmentation track in two frames, and persists only eligible samples. This association is
+still heuristic, not a confirmed label; older memory files are isolated by a new device-and-size
+namespace. Memory writes are atomic and corrupt/non-finite samples are rejected on load.
 
-## 1. "Bounding boxes where there are no troops"
+## Measured here
 
-The boxes were not noise: they were **towers**, **a tower's ornamental ring**, and **the card
-tray**. Five separate mechanisms, all measured on the real frame:
+* `python -m pytest -q` — **281 passed** in the current environment.
+* `python tools/recognition_benchmark.py` — 55 attributed real gameplay crops: **0 correct, 0 wrong,
+  55 abstained**, versus **0 correct, 3 wrong, 52 abstained** before these changes. Naming is not
+  useful on this test despite avoiding the observed wrong guesses.
+* `python tools/sprite_smoke_benchmark.py` — 8/20 correct on synthetic pastes of the same templates;
+  this is a positive integration smoke test, not a real-world accuracy claim.
+* `python tools/verify_screenshots.py samples/calibration_preview.png` — 3/3 labelled locations,
+  correct visible sides, no extras or duplicates relative to the labels, 0/3 names, **with an
+  artificial inpainted background**. The labels include a partly hidden unit and may be incomplete.
 
-| Cause | Evidence | Fix |
-|---|---|---|
-| The bar reader accepted **white HP digits printed over a tower's bar** and a **tower's crown ring** as unit health bars | 33 "bars" on one real frame, most of them UI text | `HealthBarReader`: every candidate must be a *filled capsule* (`_is_solid`), not text, and must sit in the game's **dark UI outline** (`_has_dark_outline`). Real troop bars: 6; UI text rejected: all |
-| Each phantom bar is a **Voronoi split point** inside a real blob | one Mega Knight → **3 boxes** | only capsule-backed bars may split a blob; a bare strip now folds into the sprite it is painted on |
-| The **bars-only fallback** ran over the whole calibrated arena rectangle, which on a phone extends over the **card tray and elixir bar** | 4 of 7 "units" sat at *y ≈ 31 tiles* — inside the tray | fallback is bounded to the playfield (between the kings' rows), requires a capsule, and requires a bar ≥ 0.9 tiles wide |
-| Tower exclusion used a **2.2-tile circle** | wider than the gap between a tower and the troop attacking it, so a Mega Knight at the princess tower was discarded | radius is the tower's own footprint (1.2 tiles) and one-sided in y — the tower's bar is drawn *on* its crown |
-| One sprite → body + detached shoulder pad/shield | one Mega Knight → 2 boxes | fragment merge now allows a **bar-anchored** merge to grow to 5 tiles (a bar-less guess stays at 2.6), and a bar may only attach to a blob if it floats less than 0.85 tiles above it |
-
-## 2. "Some cards are not detected"
-
-* A troop **standing still for ~5 s was absorbed into the background** and disappeared. The
-  caller now tells the model where a unit's bar is (`protect_from_absorb`), and protected pixels
-  can never become scenery.
-* **Off-by-one in the warm-up gate**: `_ensure()` bumps the frame counter, so the "settled" test
-  was unsatisfiable and the model could never leave `UNKNOWN`. Fixed (`_frames_seen - 1`).
-* Detections **on top of each other** are now collapsed by a rule that scales with the sprite's
-  own width (`_dedupe`), keeping the best-evidenced one.
-* A frame with **bars but no silhouettes** means the background model has gone stale; after 4
-  such frames the segmenter re-learns the arena instead of reporting nothing.
-
-## 3. "The fps is low"
-
-Not the capture. The decode was fine; the *vision* was doing unnecessary work:
-
-* `_has_dark_outline` did a **full-frame HSV conversion per bar candidate** → 150/frame.
-* The background blend used **boolean fancy indexing on a float image**:
-  `bg[free] += rate * (frame[free] - bg[free])` — three full-size temporaries, **14 ms** of a
-  36 ms frame. Replaced with one `cv2.addWeighted` + `np.copyto(where=)`.
-* The absorb pass re-labelled the whole arena every frame; it is now gated on "some region has
-  actually been still for 60 frames".
-
-Net: **36 ms → ~21 ms** per frame with *more* checks than before.
-
-To answer "where does the time go" in future — including the HUD, which this build cannot
-measure — the runner now profiles every stage (`cr_bot/perf.py`) and logs:
-
-```
-Frame cost: loop 24.1ms (42 fps) | vision 13.6ms (56%) | hud 6.2ms (26%) | capture 3.1ms (13%)
-  bottleneck: vision (13.6 ms mean, 18.0 ms p95, 56% of the frame) — loop target is 12 Hz
-```
-
-## 4. "scrcpy always fails and falls back to screenrecord"
-
-The symptom (server prints its `Device:` line, then no frame for 12 s) is what an Android 14+
-device looks like when the abstract socket `localabstract:scrcpy` is unavailable. Two changes,
-both in the retry ladder:
-
-* a retry with a **fresh `scid`** (its own socket name, immune to a stale/half-dead predecessor);
-* the retries get a **25 s handshake** instead of 12 s, so a cold hardware encoder is not thrown
-  away.
-
-Because this cannot be validated without the phone, `scripts/diagnose_scrcpy.py` was added: it
-checks encoders, running servers, a fresh-scid launch, the server log, and `screenrecord` — and
-prints the one thing to do about the first failure it explains.
-
-## 5. Deploying, as requested
-
-Cards are no longer dragged. **Tap the card, tap the tile** is now the default everywhere
-(`deploy_style: "tap"`, config + CLI + code defaults). The existing `deploy_card()` path already
-supported it; it just was not the default.
-
-## 6. `--auto-queue` (found in the logs)
-
-The log showed `Match started → Match ended (unknown) → Match started → Match ended (match_over)`
-within nine seconds: **one odd frame ended the match**, which reset every tracker, counted a
-match, and (with `--auto-queue`) started tapping lobby buttons mid-battle. Now:
-
-* `PhaseStabilizer` — entering a battle is instant, leaving one needs the phase to hold for
-  1 s (`battle_exit_confirm_s`); a stray frame inside a battle is ignored;
-* `LobbyNavigator` — the queue walks **Battle → mode tile → Play**, one rate-limited tap at a
-  time, instead of tapping Battle once and waiting.
-
-## 7. Clicks in the viewer
-
-Untestable without a GUI here, so the whole path is now covered by unit tests
-(`tests/test_viewer_clicks.py`, 14 tests): double-clicks (some Qt/GTK builds deliver *only*
-`EVENT_LBUTTONDBLCLK`), scaled/resized windows, sidebar clicks (ignored instead of being
-teleported into the arena edge), card-then-arena deploys, right-click cancel, dry-run.
-
----
-
-## How to re-measure
-
-```bash
-python -m pytest -q                        # 209 passed
-python tools/vision_benchmark.py           # detection rates on the real frame
-python scripts/diagnose_scrcpy.py -s RZCT20A0MBJ   # why scrcpy will not stream
-python main.py --auto-queue                # look for the "Frame cost:" line every 30 s
-```
+The 55-crop data is small, source-labelled and imperfect; 29 crops were collected after selecting
+the gates but may come from related matches. A screenshot is not a continuous gameplay sequence.
+There was no phone or live-match validation. See [SCREENSHOT_VERIFICATION.md](SCREENSHOT_VERIFICATION.md)
+for methods, commands, attribution, timings and next steps.

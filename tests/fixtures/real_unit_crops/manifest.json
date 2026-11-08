@@ -1,0 +1,772 @@
+[
+  {
+    "path": "01_0_baby_dragon.png",
+    "card": "baby_dragon",
+    "source_label": "baby_dragon",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      959,
+      562,
+      1058,
+      647
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_1_ice_wizard.png",
+    "card": "ice_wizard",
+    "source_label": "ice_wizard",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1163,
+      529,
+      1221,
+      613
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_2_tesla.png",
+    "card": "tesla",
+    "source_label": "tesla",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1177,
+      757,
+      1249,
+      833
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_3_knight.png",
+    "card": "knight",
+    "source_label": "knight",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1089,
+      754,
+      1156,
+      833
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_4_barbarians.png",
+    "card": "barbarians",
+    "source_label": "barbarians",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1129,
+      786,
+      1202,
+      873
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_5_knight.png",
+    "card": "knight",
+    "source_label": "knight",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1034,
+      609,
+      1108,
+      696
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_6_knight.png",
+    "card": "knight",
+    "source_label": "knight",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1136,
+      626,
+      1192,
+      710
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "01_7_baby_dragon.png",
+    "card": "baby_dragon",
+    "source_label": "baby_dragon",
+    "image_id": "0107QX4PFEolHM7kd0qo",
+    "split": "train",
+    "original_bbox": [
+      1160,
+      589,
+      1235,
+      667
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "02_0_cannon.png",
+    "card": "cannon",
+    "source_label": "cannon",
+    "image_id": "06y1LirJBimsZnYxJjXU",
+    "split": "train",
+    "original_bbox": [
+      1253,
+      493,
+      1336,
+      607
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "02_1_lumberjack.png",
+    "card": "lumberjack",
+    "source_label": "lumberjack",
+    "image_id": "06y1LirJBimsZnYxJjXU",
+    "split": "train",
+    "original_bbox": [
+      1129,
+      634,
+      1206,
+      727
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "02_2_ice_golem.png",
+    "card": "ice_golem",
+    "source_label": "ice_golem",
+    "image_id": "06y1LirJBimsZnYxJjXU",
+    "split": "train",
+    "original_bbox": [
+      1263,
+      663,
+      1348,
+      748
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "02_3_bandit.png",
+    "card": "bandit",
+    "source_label": "bandit",
+    "image_id": "06y1LirJBimsZnYxJjXU",
+    "split": "train",
+    "original_bbox": [
+      1059,
+      722,
+      1133,
+      815
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "03_0_mwitch.png",
+    "card": "mother_witch",
+    "source_label": "mwitch",
+    "image_id": "08lTSURxJpeILlssmSGE",
+    "split": "train",
+    "original_bbox": [
+      973,
+      557,
+      1019,
+      621
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "03_1_snowball.png",
+    "card": "giant_snowball",
+    "source_label": "snowball",
+    "image_id": "08lTSURxJpeILlssmSGE",
+    "split": "train",
+    "original_bbox": [
+      958,
+      627,
+      1050,
+      720
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "03_2_gobhut.png",
+    "card": "goblin_hut",
+    "source_label": "gobhut",
+    "image_id": "08lTSURxJpeILlssmSGE",
+    "split": "train",
+    "original_bbox": [
+      942,
+      658,
+      1001,
+      729
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "03_3_pekka.png",
+    "card": "pekka",
+    "source_label": "pekka",
+    "image_id": "08lTSURxJpeILlssmSGE",
+    "split": "train",
+    "original_bbox": [
+      1050,
+      530,
+      1112,
+      601
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "03_4_minions.png",
+    "card": "minions",
+    "source_label": "minions",
+    "image_id": "08lTSURxJpeILlssmSGE",
+    "split": "train",
+    "original_bbox": [
+      1022,
+      483,
+      1111,
+      539
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "04_0_mini_pekka.png",
+    "card": "mini_pekka",
+    "source_label": "mini_pekka",
+    "image_id": "0FVrLwsctEaihrStzqDi",
+    "split": "train",
+    "original_bbox": [
+      1069,
+      527,
+      1130,
+      599
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "04_1_dart.png",
+    "card": "dart_goblin",
+    "source_label": "dart",
+    "image_id": "0FVrLwsctEaihrStzqDi",
+    "split": "train",
+    "original_bbox": [
+      1079,
+      726,
+      1148,
+      803
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "04_2_valkyrae.png",
+    "card": "valkyrie",
+    "source_label": "valkyrae",
+    "image_id": "0FVrLwsctEaihrStzqDi",
+    "split": "train",
+    "original_bbox": [
+      1379,
+      793,
+      1467,
+      879
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "04_3_btower.png",
+    "card": "bomb_tower",
+    "source_label": "btower",
+    "image_id": "0FVrLwsctEaihrStzqDi",
+    "split": "train",
+    "original_bbox": [
+      1249,
+      840,
+      1338,
+      953
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "04_4_fireball.png",
+    "card": "fireball",
+    "source_label": "fireball",
+    "image_id": "0FVrLwsctEaihrStzqDi",
+    "split": "train",
+    "original_bbox": [
+      1165,
+      358,
+      1277,
+      501
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "05_0_baby_dragon.png",
+    "card": "baby_dragon",
+    "source_label": "baby_dragon",
+    "image_id": "0AwXBEbkvvPj6KJ8Zzmo",
+    "split": "validation",
+    "original_bbox": [
+      1417,
+      584,
+      1538,
+      701
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "05_1_baby_dragon.png",
+    "card": "baby_dragon",
+    "source_label": "baby_dragon",
+    "image_id": "0AwXBEbkvvPj6KJ8Zzmo",
+    "split": "validation",
+    "original_bbox": [
+      1490,
+      870,
+      1571,
+      987
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "05_2_goblin_cage_brawler.png",
+    "card": "goblin_cage_brawler",
+    "source_label": "goblin_cage_brawler",
+    "image_id": "0AwXBEbkvvPj6KJ8Zzmo",
+    "split": "validation",
+    "original_bbox": [
+      1346,
+      756,
+      1416,
+      845
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "05_3_pekka.png",
+    "card": "pekka",
+    "source_label": "pekka",
+    "image_id": "0AwXBEbkvvPj6KJ8Zzmo",
+    "split": "validation",
+    "original_bbox": [
+      1402,
+      710,
+      1467,
+      784
+    ],
+    "evaluation_group": "development"
+  },
+  {
+    "path": "06_0_princess.png",
+    "card": "princess",
+    "source_label": "princess",
+    "image_id": "09D7BAv2T18yIDZTLxg3",
+    "split": "train",
+    "original_bbox": [
+      1196,
+      504,
+      1270,
+      587
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "06_1_inferno_tower.png",
+    "card": "inferno_tower",
+    "source_label": "inferno_tower",
+    "image_id": "09D7BAv2T18yIDZTLxg3",
+    "split": "train",
+    "original_bbox": [
+      1392,
+      537,
+      1466,
+      678
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "06_2_minions.png",
+    "card": "minions",
+    "source_label": "minions",
+    "image_id": "09D7BAv2T18yIDZTLxg3",
+    "split": "train",
+    "original_bbox": [
+      1266,
+      1068,
+      1335,
+      1149
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "06_3_bomb.png",
+    "card": "bomb",
+    "source_label": "bomb",
+    "image_id": "09D7BAv2T18yIDZTLxg3",
+    "split": "train",
+    "original_bbox": [
+      1230,
+      776,
+      1295,
+      852
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "07_0_goblin_cage.png",
+    "card": "goblin_cage",
+    "source_label": "goblin_cage",
+    "image_id": "0Ag75eOyYIdSVCKjO2RG",
+    "split": "validation",
+    "original_bbox": [
+      1253,
+      489,
+      1344,
+      604
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "07_1_xbow.png",
+    "card": "x_bow",
+    "source_label": "xbow",
+    "image_id": "0Ag75eOyYIdSVCKjO2RG",
+    "split": "validation",
+    "original_bbox": [
+      1046,
+      789,
+      1139,
+      896
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "07_2_tesla.png",
+    "card": "tesla",
+    "source_label": "tesla",
+    "image_id": "0Ag75eOyYIdSVCKjO2RG",
+    "split": "validation",
+    "original_bbox": [
+      1173,
+      760,
+      1247,
+      853
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "08_0_egiant.png",
+    "card": "electro_giant",
+    "source_label": "egiant",
+    "image_id": "0F4gkbV4Q96YkmGVtiKL",
+    "split": "train",
+    "original_bbox": [
+      883,
+      402,
+      958,
+      477
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "08_1_inferno_dragon.png",
+    "card": "inferno_dragon",
+    "source_label": "inferno_dragon",
+    "image_id": "0F4gkbV4Q96YkmGVtiKL",
+    "split": "train",
+    "original_bbox": [
+      955,
+      312,
+      999,
+      373
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "08_2_nwitch.png",
+    "card": "night_witch",
+    "source_label": "nwitch",
+    "image_id": "0F4gkbV4Q96YkmGVtiKL",
+    "split": "train",
+    "original_bbox": [
+      855,
+      388,
+      889,
+      481
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "09_0_zappies.png",
+    "card": "zappies",
+    "source_label": "zappies",
+    "image_id": "0I9MrGtkivkzaypAwhia",
+    "split": "train",
+    "original_bbox": [
+      1420,
+      716,
+      1476,
+      792
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "10_0_cannon.png",
+    "card": "cannon",
+    "source_label": "cannon",
+    "image_id": "0MAPFVz1WRgVR5woaNBY",
+    "split": "train",
+    "original_bbox": [
+      1207,
+      889,
+      1320,
+      1006
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "10_1_log.png",
+    "card": "the_log",
+    "source_label": "log",
+    "image_id": "0MAPFVz1WRgVR5woaNBY",
+    "split": "train",
+    "original_bbox": [
+      1420,
+      793,
+      1588,
+      844
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "11_0_egolem.png",
+    "card": "elixir_golem",
+    "source_label": "egolem",
+    "image_id": "0RvnAex26GcJSccPa3PA",
+    "split": "train",
+    "original_bbox": [
+      1363,
+      617,
+      1512,
+      726
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "11_1_nwitch.png",
+    "card": "night_witch",
+    "source_label": "nwitch",
+    "image_id": "0RvnAex26GcJSccPa3PA",
+    "split": "train",
+    "original_bbox": [
+      1390,
+      444,
+      1451,
+      557
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "12_0_skeleton_dragons.png",
+    "card": "skeleton_dragons",
+    "source_label": "skeleton_dragons",
+    "image_id": "0TWqYXwT47zzuUVW0kp2",
+    "split": "train",
+    "original_bbox": [
+      1108,
+      560,
+      1165,
+      667
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "12_1_bowler.png",
+    "card": "bowler",
+    "source_label": "bowler",
+    "image_id": "0TWqYXwT47zzuUVW0kp2",
+    "split": "train",
+    "original_bbox": [
+      1018,
+      550,
+      1100,
+      668
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "12_2_three_muskeeters.png",
+    "card": "three_musketeers",
+    "source_label": "three_muskeeters",
+    "image_id": "0TWqYXwT47zzuUVW0kp2",
+    "split": "train",
+    "original_bbox": [
+      1240,
+      1118,
+      1357,
+      1216
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_0_piggies.png",
+    "card": "royal_hogs",
+    "source_label": "piggies",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      952,
+      727,
+      1160,
+      792
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_1_goblin_cage.png",
+    "card": "goblin_cage",
+    "source_label": "goblin_cage",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      1219,
+      496,
+      1302,
+      598
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_2_knight.png",
+    "card": "knight",
+    "source_label": "knight",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      1423,
+      689,
+      1492,
+      777
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_3_ice_golem.png",
+    "card": "ice_golem",
+    "source_label": "ice_golem",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      1070,
+      623,
+      1160,
+      723
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_4_baby_dragon.png",
+    "card": "baby_dragon",
+    "source_label": "baby_dragon",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      990,
+      566,
+      1088,
+      658
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_5_hunter.png",
+    "card": "hunter",
+    "source_label": "hunter",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      989,
+      733,
+      1047,
+      818
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "13_6_hunter.png",
+    "card": "hunter",
+    "source_label": "hunter",
+    "image_id": "0Tdj2hIunYrFcDluMQpK",
+    "split": "test",
+    "original_bbox": [
+      1064,
+      762,
+      1146,
+      853
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "14_0_dark_prince.png",
+    "card": "dark_prince",
+    "source_label": "dark_prince",
+    "image_id": "0ZtfKM6NFKBrVBev5TqR",
+    "split": "validation",
+    "original_bbox": [
+      1028,
+      345,
+      1089,
+      423
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "14_1_baby_dragon.png",
+    "card": "baby_dragon",
+    "source_label": "baby_dragon",
+    "image_id": "0ZtfKM6NFKBrVBev5TqR",
+    "split": "validation",
+    "original_bbox": [
+      738,
+      573,
+      807,
+      636
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "15_0_barbarians.png",
+    "card": "barbarians",
+    "source_label": "barbarians",
+    "image_id": "0fKkuB4mrQfh0q0M5kAK",
+    "split": "validation",
+    "original_bbox": [
+      1070,
+      569,
+      1139,
+      645
+    ],
+    "evaluation_group": "additional"
+  },
+  {
+    "path": "15_1_muskeeter.png",
+    "card": "musketeer",
+    "source_label": "muskeeter",
+    "image_id": "0fKkuB4mrQfh0q0M5kAK",
+    "split": "validation",
+    "original_bbox": [
+      1074,
+      624,
+      1144,
+      723
+    ],
+    "evaluation_group": "additional"
+  }
+]
