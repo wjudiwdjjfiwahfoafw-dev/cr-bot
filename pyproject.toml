@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clash-royale-mk-zap-bait-bot"
-version = "2.3.0"
+version = "2.5.0"
 description = "Clash Royale tactical bot that plays on real Android devices over ADB (scrcpy capture + verified touch injection)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,10 +27,6 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["cr_bot*"]
-
-[tool.setuptools.package-data]
-# The scrcpy server jar is pushed to the device at startup; it must ship with the package.
-"cr_bot" = ["third_party/*.jar"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

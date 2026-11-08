@@ -40,6 +40,7 @@ from cr_bot.brain.mk_zap_bait_brain import MKZapBaitBrain
 from cr_bot.config.loader import BotConfig
 from cr_bot.models import BattleState, BotAction, GamePhase
 from cr_bot.ui.debug_hud import TacticalDebugHUD
+from cr_bot.ui_window import PreviewWindow
 from cr_bot.vision.arena_detector import HybridArenaDetector
 from cr_bot.vision.deploy_verifier import DeployVerifier, SlotSnapshot
 from cr_bot.vision.elixir_tracker import ElixirReader, OpponentTracker
@@ -48,6 +49,9 @@ from cr_bot.vision.hand_detector import HandCardDetector
 from cr_bot.vision.unit_identity import UnitIdentityMemory
 
 logger = logging.getLogger(__name__)
+
+#: title of the live gameplay viewer window
+HUD_WINDOW_TITLE = "Clash Royale Bot - MK Zap Bait"
 
 
 @dataclass
@@ -77,6 +81,8 @@ class ClashRoyaleBotRunner:
     ) -> None:
         self.cfg = config
         self.show_hud = show_hud
+        #: created lazily on the first HUD frame; sizes itself to the desktop
+        self._preview = None
         self.dry_run = dry_run
         self.auto_calibrate = auto_calibrate
         self.force_recalibrate = force_recalibrate
@@ -99,7 +105,6 @@ class ClashRoyaleBotRunner:
             deploy_style=config.deploy_style,
             capture_bitrate=config.capture_bitrate,
             capture_max_fps=config.capture_max_fps,
-            scrcpy_jar=getattr(config, "scrcpy_jar", None),
             keep_awake=config.keep_screen_on,
             lock_portrait=config.lock_portrait,
             input_order=config.input_backend_order(),
@@ -478,8 +483,9 @@ class ClashRoyaleBotRunner:
 
                 if self.show_hud:
                     hud_img = self.hud.render(frame, state, self.brain.last_top_candidates, fps=fps_ema)
-                    disp = cv2.resize(hud_img, (0, 0), fx=0.72, fy=0.72, interpolation=cv2.INTER_AREA)
-                    cv2.imshow("Clash Royale Bot - MK Zap Bait", disp)
+                    if self._preview is None:
+                        self._preview = PreviewWindow(HUD_WINDOW_TITLE)
+                    self._preview.show(hud_img)  # scaled to fit the desktop, never upscaled
                     if (cv2.waitKey(1) & 0xFF) == ord("q"):
                         logger.info("Quit requested from HUD.")
                         break
@@ -493,6 +499,8 @@ class ClashRoyaleBotRunner:
         finally:
             self._worker_stop.set()
             if self.show_hud:
+                if self._preview is not None:
+                    self._preview.close()
                 cv2.destroyAllWindows()
             logger.info(
                 "Session summary: %d matches, %d deploys verified, %d failed, capture %s",

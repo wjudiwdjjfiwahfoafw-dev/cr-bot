@@ -20,8 +20,6 @@ import cv2
 import numpy as np
 import pytest
 
-from cr_bot.adb import scrcpy_protocol as proto
-from cr_bot.adb.scrcpy_multiclient import ControlChannel
 from cr_bot.adb.touch import CoordMap, GestureResult, TouchInjector
 from cr_bot.arena.device_calibrator import DeviceCalibrator, render_calibration_preview
 from cr_bot.arena.grid import ArenaCalibration, ArenaGrid
@@ -36,75 +34,6 @@ from cr_bot.vision.deploy_verifier import DeployVerifier
 from cr_bot.vision.elixir_tracker import ElixirReader
 
 FIXTURE = Path(__file__).resolve().parents[1] / "calibration_preview.png"
-
-
-# ======================================================================================
-# scrcpy protocol
-# ======================================================================================
-
-
-def test_touch_packet_is_27_byte_payload() -> None:
-    """scrcpy 1.24 CONTROL: TYPE_INJECT_TOUCH_EVENT has a 27-byte payload (28 on the wire).
-
-    py-scrcpy-client 0.4.x packs 31 bytes, which desynchronises the server's control reader
-    and silently drops every touch. This test locks in the correct layout.
-    """
-    packet = proto.build_touch(100, 200, proto.ACTION_DOWN, 720, 1280)
-    assert len(packet) == 28
-    assert proto.TOUCH_PACKET_LENGTH == 28
-    assert packet[0] == proto.TYPE_INJECT_TOUCH_EVENT
-
-    import struct
-
-    action, pointer_id, x, y, sw, sh, pressure, buttons = struct.unpack(">BqiiHHHi", packet[1:])
-    assert action == proto.ACTION_DOWN
-    assert pointer_id == proto.POINTER_ID_FINGER
-    assert (x, y) == (100, 200)
-    assert (sw, sh) == (720, 1280)
-    assert pressure == proto.MAX_PRESSURE
-    assert buttons == 0
-
-
-def test_touch_packet_clamps_out_of_range_and_zeroes_up_pressure() -> None:
-    packet = proto.build_touch(9999, -50, proto.ACTION_UP, 720, 1280)
-    import struct
-
-    _a, _pid, x, y, _sw, _sh, pressure, _b = struct.unpack(">BqiiHHHi", packet[1:])
-    assert x == 719 and y == 0
-    assert pressure == 0  # a lifted finger must not report pressure
-
-
-class _FakeSock:
-    def __init__(self) -> None:
-        self.sent: List[bytes] = []
-
-    def sendall(self, payload: bytes) -> None:
-        self.sent.append(payload)
-
-    def close(self) -> None:
-        pass
-
-
-def test_control_channel_drag_emits_down_moves_up() -> None:
-    sock = _FakeSock()
-    control = ControlChannel(sock, 720, 1280)  # type: ignore[arg-type]
-    control.drag((200, 1100), (300, 700), duration_ms=60, steps=4, settle_ms=0)
-
-    import struct
-
-    events = [struct.unpack(">B", p[:1])[0] for p in sock.sent]
-    actions = [struct.unpack(">BqiiHHHi", p[1:])[0] for p in sock.sent]
-    coords = [(struct.unpack(">BqiiHHHi", p[1:])[2], struct.unpack(">BqiiHHHi", p[1:])[3]) for p in sock.sent]
-
-    assert events == [proto.TYPE_INJECT_TOUCH_EVENT] * len(sock.sent)
-    assert actions[0] == proto.ACTION_DOWN
-    assert actions[-1] == proto.ACTION_UP
-    assert all(a == proto.ACTION_MOVE for a in actions[1:-1])
-    assert coords[0] == (200, 1100)
-    assert coords[-1] == (300, 700)
-    # Motion must be monotonic towards the target, never jump backwards.
-    xs = [c[0] for c in coords]
-    assert xs == sorted(xs)
 
 
 # ======================================================================================

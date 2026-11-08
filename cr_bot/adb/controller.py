@@ -1,17 +1,18 @@
 """
-ADB controller facade: scrcpy capture + low-latency touch injection for Clash Royale.
+ADB controller facade: live capture + low-latency touch injection for Clash Royale.
 
 This replaces the original implementation, which had two problems that together explain
 "screen capture works but cards never get placed":
 
 * **Capture** used ``adb exec-out screencap``. On a real phone that is a 150-400 ms round
-  trip, so the bot was always acting on a stale frame. It now streams over scrcpy through
-  :class:`~cr_bot.adb.scrcpy_multiclient.MultiClient` and always reads the newest frame.
+  trip, so the bot was always acting on a stale frame. It now streams H.264 through
+  :class:`~cr_bot.adb.capture.MultiClient` (``screenrecord`` by default) and always reads the
+  newest frame.
 * **Input** used two ``input tap`` calls with a nominal 60 ms gap. Each ``input`` invocation
   spawns a JVM on the device, and a zero-length tap is routinely dropped by the game. Cards
-  are now deployed with a real drag gesture, injected through the scrcpy control socket when
-  available (sub-10 ms, persistent connection, genuine press durations), with ``input swipe``
-  and ``input motionevent`` as fallbacks.
+  are now deployed with a real drag gesture with genuine press durations, using
+  ``input swipe`` first and ``input motionevent`` / ``input tap`` as fallbacks — and every
+  deploy is verified by re-reading the hand afterwards.
 
 Coordinates are handled in **frame space** and converted to device pixels exactly once, in
 :class:`~cr_bot.adb.touch.CoordMap`, so a downscaled capture stream can never shift taps.
@@ -26,7 +27,7 @@ from typing import Optional, Sequence, Tuple
 import numpy as np
 
 from cr_bot.adb.adb_utils import Adb, ADBError, COMMON_ADB_PATHS, COMMON_EMULATOR_PORTS  # noqa: F401
-from cr_bot.adb.scrcpy_multiclient import MultiClient
+from cr_bot.adb.capture import MultiClient
 from cr_bot.adb.touch import CoordMap, DEFAULT_ORDER, GestureResult, TouchInjector
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,6 @@ class ADBController:
         input_backend: str = "auto",
         deploy_style: str = "drag",
         capture_bitrate: int = 12_000_000,
-        scrcpy_jar: Optional[str] = None,
         capture_max_fps: int = 30,
         keep_awake: bool = True,
         lock_portrait: bool = True,
@@ -65,7 +65,6 @@ class ADBController:
         self._input_backend_requested = input_backend
         self.deploy_style = deploy_style
         self.capture_bitrate = int(capture_bitrate)
-        self.scrcpy_jar = scrcpy_jar
         self.capture_max_fps = int(capture_max_fps)
         self.keep_awake = bool(keep_awake)
         self.lock_portrait = bool(lock_portrait)
@@ -109,15 +108,16 @@ class ADBController:
             bitrate=self.capture_bitrate,
             max_fps=self.capture_max_fps,
             backend=self.capture_backend,
-            scrcpy_jar=self.scrcpy_jar,
         )
         self.client.start()
         session = self.client.session()
         self.backend_name = getattr(self.client, "backend_used", "") or type(session).__name__
         if getattr(self.client, "fallback_reason", ""):
             logger.warning(
-                "Capture downgraded to %s (live scrcpy unavailable). Deploy timing still works, "
-                "but reactions lag by one frame.", self.backend_name
+                "Capture is running on the %r backend after degrading down the ladder. "
+                "Deploy timing still works; frame rate may be lower. Reason:\n%s",
+                self.backend_name,
+                getattr(self.client, "fallback_reason", ""),
             )
 
         frame = session.latest_frame(timeout=5.0)

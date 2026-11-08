@@ -39,10 +39,10 @@ def parse_args() -> argparse.Namespace:
                         help="Stop automatically after playing N matches.")
 
     # -- real-device plumbing --
-    parser.add_argument("--capture", choices=["auto", "scrcpy", "scrcpy_py", "screencap"],
+    parser.add_argument("--capture", choices=["auto", "screenrecord", "scrcpy_py", "screencap"],
                         default=None, help="Capture backend (default from config).")
     parser.add_argument("--input", dest="input_backend",
-                        choices=["auto", "scrcpy", "swipe", "motionevent", "tap"],
+                        choices=["auto", "swipe", "motionevent", "tap"],
                         default=None, help="Touch injection backend (default from config).")
     parser.add_argument("--deploy-style", choices=["drag", "tap"], default=None,
                         help="Card placement gesture. `drag` is the game's native gesture.")
@@ -97,17 +97,22 @@ def print_stats(cfg) -> int:
         else:
             print("clash royale: NO  <- no build of the game found; configure game.packages "
                   "if you play a custom APK")
-    print(f"capture     : {cfg.capture_backend} @ {cfg.capture_width}px, {cfg.capture_max_fps}fps")
+    ladder = {
+        "auto": "screenrecord -> scrcpy_py -> screencap",
+        "screenrecord": "screenrecord only",
+        "scrcpy_py": "scrcpy library only",
+        "screencap": "screencap only",
+    }.get(cfg.capture_backend, cfg.capture_backend)
+    print(f"capture     : {cfg.capture_backend} ({ladder}) @ {cfg.capture_width}px, {cfg.capture_max_fps}fps")
     print(f"input       : {' -> '.join(cfg.input_backend_order())} ({cfg.deploy_style})")
 
-    from cr_bot.adb.scrcpy_multiclient import MultiClient, available_jars, find_scrcpy_jar
+    from cr_bot.adb.capture import MultiClient, scrcpy_py_available
 
-    try:
-        chosen = find_scrcpy_jar(cfg.scrcpy_jar)
-        versions = ", ".join(p.name.replace("scrcpy-server-", "") for p in available_jars())
-        print(f"scrcpy      : {chosen.name}  (bundled: {versions})")
-    except FileNotFoundError as exc:
-        print(f"scrcpy      : MISSING - {exc}")
+    lib = scrcpy_py_available()
+    if lib:
+        print(f"scrcpy lib  : scrcpy {lib} installed (brings its own server jar)")
+    else:
+        print("scrcpy lib  : not installed - `screenrecord` needs no jar and is the default")
 
     print("\nprobing capture ...")
     client = MultiClient(
@@ -134,9 +139,15 @@ def print_stats(cfg) -> int:
         time.sleep(0.6)
         fps = client.fps
         print(f"capture     : {backend} OK - {frame.shape[1]}x{frame.shape[0]} @ {fps:.1f} fps")
-        if backend == "screencap":
+        if backend == "screenrecord":
             print(
-                "              NOTE: running on the screencap fallback (~5-8 fps). Playable, but "
+                "              Running on `screenrecord` (Android's own tool): full frame rate, "
+                "\n              but touch goes through `adb shell input`, so deploys land a few "
+                "ms later."
+            )
+        else:
+            print(
+                "              NOTE: running on the screencap fallback (~1-8 fps). Playable, but "
                 "reactions are late.\n              See the reason above; `--capture screencap` "
                 "makes this choice explicit."
             )

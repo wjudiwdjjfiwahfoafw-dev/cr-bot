@@ -115,34 +115,6 @@ class TouchBackend:
         return True
 
 
-class ScrcpyControlBackend(TouchBackend):
-    """Persistent socket injection through the scrcpy server (fastest, most faithful)."""
-
-    name = "scrcpy"
-
-    def __init__(self, adb: Adb, coord: CoordMap, control) -> None:
-        super().__init__(adb, coord)
-        self._control = control
-        control.set_screen_size(coord.frame_w, coord.frame_h)
-
-    @property
-    def available(self) -> bool:
-        return self._control is not None and self._control.last_error is None
-
-    def tap(self, x: float, y: float, hold_ms: float = 70.0) -> None:
-        fx, fy = self.coord.clamp_frame(x, y)
-        t0 = time.perf_counter()
-        self._control.tap(fx, fy, hold_ms=hold_ms)
-        self.last_latency_ms = (time.perf_counter() - t0) * 1000.0
-
-    def drag(self, start: Point, end: Point, duration_ms: float = 180.0, steps: int = 8) -> None:
-        sx, sy = self.coord.clamp_frame(*start)
-        ex, ey = self.coord.clamp_frame(*end)
-        t0 = time.perf_counter()
-        self._control.drag((sx, sy), (ex, ey), duration_ms=duration_ms, steps=steps)
-        self.last_latency_ms = (time.perf_counter() - t0) * 1000.0
-
-
 class SwipeBackend(TouchBackend):
     """`adb shell input swipe` — one invocation, one native drag, no JVM churn per move."""
 
@@ -266,7 +238,7 @@ class GestureResult:
     note: str = ""
 
 
-DEFAULT_ORDER = ("scrcpy", "swipe", "motionevent", "tap")
+DEFAULT_ORDER = ("swipe", "motionevent", "tap")
 
 
 class TouchInjector:
@@ -316,8 +288,8 @@ class TouchInjector:
 
     def _build_backends(self, control) -> Dict[str, TouchBackend]:
         built: Dict[str, TouchBackend] = {}
-        if control is not None:
-            built["scrcpy"] = ScrcpyControlBackend(self.adb, self.coord, control)
+        # There is no scrcpy control channel any more: every backend here goes through
+        # `adb shell input`, and each deploy is verified on the device afterwards.
         built["swipe"] = SwipeBackend(self.adb, self.coord)
         built["motionevent"] = MotionEventBackend(self.adb, self.coord)
         built["tap"] = TapBackend(self.adb, self.coord)

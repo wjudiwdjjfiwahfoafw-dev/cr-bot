@@ -59,7 +59,7 @@ def _hand(grid: ArenaGrid, names: list[str], elixir: float) -> list[HandSlot]:
 def test_raw_rgba_screencap_decoder() -> None:
     """The raw RGBA screencap decoder still works (now living in ScreencapSession)."""
     from cr_bot.adb.adb_utils import Adb
-    from cr_bot.adb.scrcpy_multiclient import ScreencapSession
+    from cr_bot.adb.capture import ScreencapSession
 
     w, h = 720, 1280
     rgba = np.zeros((h, w, 4), dtype=np.uint8)

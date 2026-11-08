@@ -43,6 +43,7 @@ from cr_bot.arena.device_calibrator import (  # noqa: E402
 )
 from cr_bot.arena.grid import ArenaGrid  # noqa: E402
 from cr_bot.config.loader import load_config  # noqa: E402
+from cr_bot.ui_window import PreviewWindow  # noqa: E402
 
 
 def grab_frame(cfg, serial: str | None, image: str | None) -> tuple[np.ndarray, str]:
@@ -132,15 +133,19 @@ def manual_pick(frame: np.ndarray) -> dict[str, tuple[float, float]]:
                     (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
         return img
 
+    # The window is scaled down to fit the desktop; clicks arrive in *displayed* pixels, so
+    # they are divided by the preview scale to land on the right spot in the full-res frame.
+    preview_window = PreviewWindow(win)
+
     def on_mouse(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN and len(points) < 4:
-            points.append((float(x), float(y)))
+            scale = preview_window.scale or 1.0
+            points.append((float(x) / scale, float(y) / scale))
 
-    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.setMouseCallback(win, on_mouse)
     try:
         while True:
-            cv2.imshow(win, redraw())
+            preview_window.show(redraw())
             key = cv2.waitKey(30) & 0xFF
             if key == 13 and len(points) == 4:
                 break
@@ -149,7 +154,7 @@ def manual_pick(frame: np.ndarray) -> dict[str, tuple[float, float]]:
             if key == 27:
                 raise SystemExit("Cancelled.")
     finally:
-        cv2.destroyWindow(win)
+        preview_window.close()
 
     top = sorted(points, key=lambda p: p[1])[:2]
     bottom = sorted(points, key=lambda p: p[1])[2:]
@@ -246,9 +251,11 @@ def main() -> int:
         print("!! Re-run during the battle countdown, or use --manual for an exact fit.")
 
     if not args.no_window and has_display():
-        cv2.imshow("calibration", preview)
+        window = PreviewWindow("calibration")
+        window.show(preview)  # fits the desktop instead of opening at 1080x2400
         print("Press any key in the preview window to close it.")
         cv2.waitKey(0)
+        window.close()
         cv2.destroyAllWindows()
     else:
         print("(Headless: open the preview PNG to check the alignment.)")

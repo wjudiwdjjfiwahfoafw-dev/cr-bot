@@ -179,50 +179,10 @@ def test_stats_names_the_installed_build(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr("cr_bot.adb.adb_utils.Adb", lambda *a, **k: _CustomBuildAdb())
     monkeypatch.setattr(
-        "cr_bot.adb.scrcpy_multiclient.MultiClient.start",
+        "cr_bot.adb.capture.MultiClient.start",
         lambda self: (_ for _ in ()).throw(__import__("cr_bot.adb.adb_utils", fromlist=["ADBError"]).ADBError("boom")),
     )
     cli.print_stats(BotConfig())
     out = capsys.readouterr().out
     assert "nullsroyale.rel.free" in out
     assert "no build of the game found" not in out
-
-
-# ======================================================================================
-# scrcpy server selection
-# ======================================================================================
-
-def test_newest_bundled_server_is_preferred() -> None:
-    from cr_bot.adb.scrcpy_multiclient import available_jars, find_scrcpy_jar
-
-    jars = available_jars()
-    assert jars, "at least one server jar must ship with the repo"
-    from cr_bot.adb.scrcpy_protocol import parse_server_version
-
-    newest = max(parse_server_version(p.name) for p in jars)
-    assert parse_server_version(find_scrcpy_jar().name) == newest
-
-
-def test_an_explicit_server_jar_wins(tmp_path) -> None:
-    from cr_bot.adb.scrcpy_multiclient import find_scrcpy_jar
-
-    custom = tmp_path / "scrcpy-server-v1.24.jar"
-    custom.write_bytes(b"fake")
-    assert find_scrcpy_jar(str(custom)) == custom
-
-
-def test_missing_explicit_jar_is_reported(tmp_path) -> None:
-    from cr_bot.adb.scrcpy_multiclient import find_scrcpy_jar
-
-    with pytest.raises(FileNotFoundError):
-        find_scrcpy_jar(str(tmp_path / "nope.jar"))
-
-
-def test_the_bundled_modern_server_is_a_real_jar() -> None:
-    """Guard against committing a placeholder: a jar starts with PK 0x03 0x04."""
-    from cr_bot.adb.scrcpy_multiclient import available_jars
-
-    modern = [p for p in available_jars() if "5.0.1" in p.name]
-    assert modern, "the v5 server should be bundled"
-    head = modern[0].read_bytes()[:4]
-    assert head[:2] == b"PK", f"{modern[0].name} does not look like a jar: {head!r}"

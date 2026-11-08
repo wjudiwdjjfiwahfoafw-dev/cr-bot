@@ -32,12 +32,17 @@ adb:
   latency_sec: 0.10        # Round-trip latency the brain compensates for
 
 # ---------------------------------------------------------------------------------------
-# Capture: a live scrcpy stream instead of `adb exec-out screencap`.
-# `screencap` costs 150-400 ms per frame on a real phone, which makes the bot permanently
-# react to stale information. The scrcpy stream costs ~2-30 ms and is always current.
+# Capture: a live H.264 stream instead of `adb exec-out screencap`.
+# `screencap` costs 150-400 ms per frame on a real phone (~1 fps), which makes the bot
+# permanently react to stale information. A streamed backend costs ~2-30 ms and is current.
 # ---------------------------------------------------------------------------------------
 capture:
-  backend: "auto"          # auto | scrcpy | scrcpy_py | screencap
+  # Capture ladder: screenrecord -> scrcpy_py -> screencap (first one that delivers frames wins).
+  #   screenrecord  Android's own binary, 25-30 fps, no server jar, nothing version-specific
+  #   scrcpy_py     the `scrcpy` PyPI package, if installed (it pushes its own server jar)
+  #   screencap     always works, ~1 fps on a 1080p phone
+  # No scrcpy server jar ships with this repo. Use "auto" unless you are debugging a backend.
+  backend: "auto"          # auto | screenrecord | scrcpy_py | screencap
   width: 720               # Streamed width; 720 is plenty for vision and much faster
   bitrate: 12000000
   max_fps: 30
@@ -48,8 +53,8 @@ capture:
 # two zero-duration taps, which the game frequently ignores.
 # ---------------------------------------------------------------------------------------
 input:
-  backend: "auto"          # auto -> scrcpy control socket first, then adb fallbacks
-  chain: ["scrcpy", "swipe", "motionevent", "tap"]
+  backend: "auto"          # auto -> swipe first, then the more literal adb fallbacks
+  chain: ["swipe", "motionevent", "tap"]
   deploy_style: "drag"     # drag | tap
   verify_threshold: 9.0    # Pixel-diff (0-255) that counts as "the card left the hand"
 

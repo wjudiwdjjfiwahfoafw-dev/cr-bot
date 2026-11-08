@@ -43,8 +43,9 @@ to stop it playing; together they made it look completely inert.
 Bonus: the popular `scrcpy-client` Python package packs a **31-byte**
 `INJECT_TOUCH_EVENT` payload, but a scrcpy 1.24 server requires exactly **27** bytes. That
 desynchronises the control reader and turns every touch into a no-op — a hidden trap for
-anyone wiring up scrcpy-based input. `cr_bot/adb/scrcpy_protocol.py` implements the correct
-layout, and `_patch_scrcpy_py_touch()` repairs the library if you prefer it.
+anyone wiring up scrcpy-based input. This bot therefore never injects touches over a scrcpy
+socket: input goes through `adb shell input`, and every deploy is verified on the device
+before the hand model trusts it.
 
 ---
 
@@ -110,20 +111,17 @@ Press `q` in the HUD window or `Ctrl+C` to stop.
 
 ## Using `MultiClient` directly
 
-`cr_bot.adb.scrcpy_multiclient.MultiClient` is the capture layer. It manages one session per
-device, keeps an always-latest frame, and owns the scrcpy control channel:
+`cr_bot.adb.capture.MultiClient` is the capture layer. It manages one session per device and
+keeps an always-latest frame:
 
 ```python
-from cr_bot.adb.scrcpy_multiclient import MultiClient
+from cr_bot.adb.capture import MultiClient
 
 mc = MultiClient(target_width=720, max_fps=30)      # or MultiClient(serials=["R58M…", "10.0.0.5:5555"])
 mc.start()
 
 frame = mc.latest_frame()                            # newest BGR frame, never a stale one
-print(mc.resolution, f"{mc.fps:.1f} fps", mc.status())
-
-# Native drag: press the card, glide to the tile, release.
-mc.control.drag((224, 1162), (300, 700))
+print(mc.resolution, f"{mc.fps:.1f} fps", mc.backend_used)
 
 mc.stop()
 ```
@@ -132,14 +130,16 @@ Backends (`capture.backend`):
 
 | Value | What it does |
 | :--- | :--- |
-| `auto` *(default)* | Native scrcpy protocol implementation; falls back to `screencap` if the stream cannot start. |
-| `scrcpy` | Force the native protocol implementation (recommended). |
-| `scrcpy_py` | Wrap the `scrcpy` package (py-scrcpy-client), with its touch packets repaired. |
+| `auto` *(default)* | `screenrecord` → `scrcpy_py` → `screencap`; the first one that delivers frames wins. |
+| `screenrecord` | Android's own binary: H.264 at display rate, no server jar, nothing version-specific. |
+| `scrcpy_py` | The `scrcpy` PyPI package (py-scrcpy-client), if it is installed. It pushes its own server jar. |
 | `screencap` | Legacy `adb exec-out screencap` polling — slow, but a useful way to prove ADB itself is healthy. |
 
-The native backend exists because `scrcpy-client` pins `av<10` / `adbutils<0.15`, which no
-longer build on current Python. The scrcpy **server jar** (`cr_bot/third_party/scrcpy-server-v1.24.jar`)
-ships with the repo and is pushed to the device at startup.
+**No scrcpy server jar is bundled and no scrcpy wire protocol is implemented here.** A
+hand-maintained server became stale every time Android changed its encoder rules, and the
+failure mode was silent (server starts, prints its device line, never sends a frame). The two
+paths above cover the same need with nothing version-sensitive in the repository: `screenrecord`
+ships with Android, and `scrcpy_py` brings its own jar.
 
 ---
 
@@ -171,8 +171,7 @@ cr-bot/
 ├── cr_bot/
 │   ├── adb/
 │   │   ├── adb_utils.py           # device discovery, resolution, rotation, screen wake
-│   │   ├── scrcpy_protocol.py     # scrcpy 1.24 wire protocol + H.264 decoding
-│   │   ├── scrcpy_multiclient.py  # MultiClient: live capture + control channel
+│   │   ├── capture.py             # MultiClient: screenrecord / scrcpy_py / screencap + H.264
 │   │   ├── touch.py               # backends, drag/place gestures, escalation
 │   │   └── controller.py          # facade used by the runner
 │   ├── arena/
@@ -191,7 +190,7 @@ cr-bot/
 │   ├── brain/                     # utility planner, threat analysis, pending tracking
 │   ├── sim/                       # tick-accurate benchmark engine
 │   ├── ui/debug_hud.py            # live tactical overlay
-│   ├── third_party/               # scrcpy-server-v1.24.jar
+│   ├── ui_window.py               # fits every preview window to the desktop
 │   └── bot_runner.py              # main control loop
 ├── scripts/
 │   ├── calibrate_device.py        # auto / manual / from-image calibration
@@ -238,13 +237,29 @@ run.
 
 ### Capture backends: what you actually get
 
-| Backend | Latency | When it is used |
-| :--- | :--- | :--- |
-| `scrcpy` (native, default) | one frame (~16-33 ms), plus sub-10 ms touch injection over the same socket | whenever the bundled server can start |
-| `screencap` | 120-300 ms per frame, touches via `input` | automatically if scrcpy cannot start, or with `--capture screencap` |
+The bot walks a **ladder** and stops at the first rung that delivers frames. All three play
+the game; only reaction time and input latency differ.
 
-Both play the game; only the reaction time differs. The bot tells you which one is live in the
-connection log and in `--stats`.
+| # | Backend | Frame rate | Input | When it is used |
+| :-- | :--- | :--- | :--- | :--- |
+| 1 | `screenrecord` | 25-30 fps | `adb shell input` | default; Android's own binary, needs **no server jar** |
+| 2 | `scrcpy_py` | 30-60 fps | `adb shell input` | if the `scrcpy` PyPI package is installed; it pushes its own jar |
+| 3 | `screencap` | ~1 fps on a 1080p phone | `adb shell input` | last resort, or `--capture screencap` |
+
+Rung 1 is Android's own `screenrecord` binary, which is already on every device from 4.4 up.
+It streams the same H.264 a scrcpy server would, without a socket handshake, a bundled jar, or
+any Android-version coupling — which is why a phone that used to fall all the way to `screencap`
+now gets near-full frame rate.
+
+```bash
+python main.py --capture auto          # the ladder above (default)
+python main.py --capture screenrecord  # force Android's tool
+python main.py --capture scrcpy_py     # force the scrcpy library, if installed
+python main.py --capture screencap     # force the slow, always-works path
+```
+
+The live backend is reported on connect and in `--stats`, and
+`python scripts/check_capture.py` measures them side by side.
 
 ---
 
@@ -288,21 +303,24 @@ If your build's id matches nothing in the list, `--package <id>` is enough — n
 
 ---
 
-## scrcpy server versions
+## Capture backends without a bundled server
 
-`cr_bot/third_party/` ships **two** server jars and the bot uses the newest:
+Earlier versions shipped `scrcpy-server-*.jar` files and a hand-written protocol reader. Both
+are gone, for three reasons that all showed up on real hardware:
 
-| Bundled | Protocol | Notes |
-| :--- | :--- | :--- |
-| `scrcpy-server-v5.0.1.jar` | modern (`audio=false`, `video_codec`, `send_stream_meta`, no size in the handshake) | needed for Android 13/14/15 |
-| `scrcpy-server-v1.24.jar` | legacy (`bit_rate`, size appended after the device name) | kept as a fallback for old ROMs |
+* a server jar is only correct for the Android releases it was built against; on Android 13+
+  a stale one starts, prints `Device: …`, and then never produces a frame;
+* vendor encoders (Samsung, in particular) reject a 720p/30 H.264 configuration that older
+  Android accepted, and the server reports nothing;
+* every workaround had to be re-derived for each new release.
 
-The version is read from the filename, so dropping a newer jar into `cr_bot/third_party/` is all it
-takes to upgrade (or point at one explicitly with `capture.scrcpy_jar`). On startup the bot kills
-leftover servers, verifies the pushed jar, and then tries a **ladder of encoder configurations**
-(H.264 → explicit encoders → lower bitrate → H.265), stopping early if two different
-configurations fail identically — because then the problem is not the configuration. If nothing
-works it prints the server's own error and degrades to `screencap` rather than refusing to run.
+The replacement is Android's own `screenrecord`, which is already on the phone and streams the
+same H.264 without any handshake. `MultiClient` measures it against `screencap` and reports the
+winner in `--stats`; `scripts/check_capture.py` measures every backend side by side:
+
+```bash
+python scripts/check_capture.py --seconds 6
+```
 
 ---
 

@@ -42,12 +42,12 @@ class BotConfig:
 
     # --- real-device capture / input ------------------------------------------------
     capture_width: int = 720          # streamed frame width (lower = faster, still accurate)
-    capture_backend: str = "auto"     # auto | scrcpy | scrcpy_py | screencap
+    capture_backend: str = "auto"     # auto | screenrecord | scrcpy_py | screencap
     capture_bitrate: int = 12_000_000
     capture_max_fps: int = 30
-    input_backend: str = "auto"       # auto | scrcpy | swipe | motionevent | tap
+    input_backend: str = "auto"       # auto | swipe | motionevent | tap
     input_backend_chain: List[str] = field(
-        default_factory=lambda: ["scrcpy", "swipe", "motionevent", "tap"]
+        default_factory=lambda: ["swipe", "motionevent", "tap"]
     )
     deploy_style: str = "drag"        # drag | tap
     deploy_verify_threshold: float = 9.0
@@ -61,7 +61,6 @@ class BotConfig:
         default_factory=lambda: ["clashroyale", "clash_royale", "nullsroyale"]
     )
     #: explicit scrcpy server jar (default: newest bundled)
-    scrcpy_jar: Optional[str] = None
     identity_dir: str = "assets/unit_identity"
     enable_identity_learning: bool = True
     keep_screen_on: bool = True
@@ -80,7 +79,7 @@ class BotConfig:
         primary = (self.input_backend or "auto").lower()
         if primary not in ("auto", "default", ""):
             chain = [primary] + [b for b in chain if b != primary]
-        return chain or ["scrcpy", "swipe", "motionevent", "tap"]
+        return chain or ["swipe", "motionevent", "tap"]
 
     def normalized_deck(self) -> List[str]:
         return [normalize_card_name(c) for c in self.deck]
@@ -132,7 +131,7 @@ def load_config(path: str | Path) -> BotConfig:
         capture_bitrate=int(capture_cfg.get("bitrate", 12_000_000)),
         capture_max_fps=int(capture_cfg.get("max_fps", 30)),
         input_backend=str(input_cfg.get("backend", "auto")),
-        input_backend_chain=list(input_cfg.get("chain", ["scrcpy", "swipe", "motionevent", "tap"])),
+        input_backend_chain=list(input_cfg.get("chain", ["swipe", "motionevent", "tap"])),
         deploy_style=str(input_cfg.get("deploy_style", "drag")),
         deploy_verify_threshold=float(input_cfg.get("verify_threshold", 9.0)),
         calibration_dir=str(calib_cfg.get("dir", "configs/calibration")),
@@ -140,7 +139,6 @@ def load_config(path: str | Path) -> BotConfig:
                            ["com.supercell.clashroyale", "nullsroyale.rel.free"]),
         game_package_hints=list(game_cfg.get("package_hints", None) or
                                 ["clashroyale", "clash_royale", "nullsroyale"]),
-        scrcpy_jar=capture_cfg.get("scrcpy_jar", None),
         identity_dir=str(vision_cfg.get("identity_dir", "assets/unit_identity")),
         enable_identity_learning=bool(vision_cfg.get("identity_learning", True)),
         keep_screen_on=bool(adb_cfg.get("keep_screen_on", True)),
