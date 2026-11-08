@@ -172,17 +172,42 @@ def _free_port() -> int:
 
 
 class ControlChannel:
-    """Serialized writer for scrcpy control packets (touch / keycode)."""
+    """Serialized writer for scrcpy control packets (touch / keycode).
 
-    def __init__(self, sock: socket.socket, screen_w: int, screen_h: int) -> None:
+    The payload layout depends on the *server* version that is running, so this class carries
+    the version of the jar that was actually pushed and asks
+    :mod:`cr_bot.adb.scrcpy_protocol` for the right serialisation. Getting that wrong is
+    invisible from the outside: the video keeps flowing, the taps just stop existing.
+    """
+
+    def __init__(
+        self,
+        sock: socket.socket,
+        screen_w: int,
+        screen_h: int,
+        version: Tuple[int, int, int] = (1, 24, 0),
+    ) -> None:
         self._sock = sock
         self._lock = threading.Lock()
         self.screen_w = int(screen_w)
         self.screen_h = int(screen_h)
+        self.version = tuple(version)  # type: ignore[assignment]
         self.packets_sent = 0
         self.last_error: Optional[str] = None
+        #: total wall time spent writing touch packets, for the HUD/latency report
+        self.touch_seconds = 0.0
+
+    # -- geometry ------------------------------------------------------------------
+    @property
+    def screen_size(self) -> Tuple[int, int]:
+        return (self.screen_w, self.screen_h)
 
     def set_screen_size(self, width: int, height: int) -> None:
+        """Update the coordinate space to the size of the frames we actually receive.
+
+        The server scales these values to the physical display, so telling it the *streamed*
+        size is what lets the bot tap in frame coordinates on a downscaled stream.
+        """
         self.screen_w, self.screen_h = int(width), int(height)
 
     # -- primitives ----------------------------------------------------------------
@@ -197,28 +222,53 @@ class ControlChannel:
                 logger.debug("Control channel send failed: %s", exc)
                 return False
 
-    def touch(self, x: int, y: int, action: int, pointer_id: int = proto.POINTER_ID_FINGER) -> bool:
-        return self.send(proto.build_touch(x, y, action, self.screen_w, self.screen_h, pointer_id=pointer_id))
+    def touch(
+        self,
+        x: int,
+        y: int,
+        action: int,
+        pointer_id: int = proto.POINTER_ID_FINGER,
+        pressure: Optional[float] = None,
+    ) -> bool:
+        return self.send(
+            proto.build_touch(
+                x,
+                y,
+                action,
+                self.screen_w,
+                self.screen_h,
+                pointer_id=pointer_id,
+                pressure=pressure,
+                # a finger touch must leave both button fields at 0, or the server injects a
+                # MOUSE drag and Clash Royale ignores it
+                buttons=0,
+                action_button=0,
+                version=self.version,
+            )
+        )
 
     def touch_down(self, x: int, y: int, pointer_id: int = proto.POINTER_ID_FINGER) -> bool:
-        return self.touch(x, y, proto.ACTION_DOWN, pointer_id)
+        return self.touch(x, y, proto.ACTION_DOWN, pointer_id, pressure=1.0)
 
     def touch_move(self, x: int, y: int, pointer_id: int = proto.POINTER_ID_FINGER) -> bool:
-        return self.touch(x, y, proto.ACTION_MOVE, pointer_id)
+        return self.touch(x, y, proto.ACTION_MOVE, pointer_id, pressure=1.0)
 
     def touch_up(self, x: int, y: int, pointer_id: int = proto.POINTER_ID_FINGER) -> bool:
-        return self.touch(x, y, proto.ACTION_UP, pointer_id)
+        return self.touch(x, y, proto.ACTION_UP, pointer_id, pressure=0.0)
 
-    def tap(self, x: int, y: int, hold_ms: float = 70.0) -> None:
+    def tap(self, x: int, y: int, hold_ms: float = 70.0) -> bool:
         """A press with a real duration.
 
-        A zero-length press is what `input tap` effectively produces, and Unity/Engine games
+        A zero-length press is what ``input tap`` effectively produces, and Unity/Engine games
         routinely drop it. Any deliberate hold of 50-120 ms is far more reliable.
         """
-        self.touch_down(x, y)
+        t0 = time.perf_counter()
+        ok = self.touch_down(x, y)
         if hold_ms > 0:
             time.sleep(hold_ms / 1000.0)
-        self.touch_up(x, y)
+        ok = self.touch_up(x, y) and ok
+        self.touch_seconds += time.perf_counter() - t0
+        return ok
 
     def drag(
         self,
@@ -227,29 +277,37 @@ class ControlChannel:
         duration_ms: float = 180.0,
         steps: int = 10,
         settle_ms: float = 45.0,
-    ) -> None:
-        """Press, glide to the target, hold briefly, release — a native drag-and-drop."""
+    ) -> bool:
+        """Press, glide to the target, hold briefly, release — a native drag-and-drop.
+
+        This is the gesture Clash Royale is designed around: the card follows the finger and
+        the deploy preview follows the pointer, so the game samples a real position at
+        release instead of guessing from a select-then-tap sequence.
+        """
+        t0 = time.perf_counter()
         sx, sy = int(start[0]), int(start[1])
         ex, ey = int(end[0]), int(end[1])
-        self.touch_down(sx, sy)
+        ok = self.touch_down(sx, sy)
         duration_ms = max(0.0, duration_ms)
         step_sleep = (duration_ms / 1000.0) / max(1, steps)
         for i in range(1, steps + 1):
             t = i / steps
-            self.touch_move(int(round(sx + (ex - sx) * t)), int(round(sy + (ey - sy) * t)))
+            ok = self.touch_move(int(round(sx + (ex - sx) * t)), int(round(sy + (ey - sy) * t))) and ok
             if step_sleep > 0:
                 time.sleep(step_sleep)
         if settle_ms > 0:
             # Hovering on the target before release is what the game samples for placement.
             time.sleep(settle_ms / 1000.0)
-        self.touch_up(ex, ey)
+        ok = self.touch_up(ex, ey) and ok
+        self.touch_seconds += time.perf_counter() - t0
+        return ok
 
-    def keycode(self, keycode: int, action: int = proto.ACTION_DOWN) -> None:
-        self.send(proto.build_keycode(keycode, action))
+    def keycode(self, keycode: int, action: int = proto.ACTION_DOWN) -> bool:
+        return self.send(proto.build_keycode(keycode, action, version=self.version))
 
-    def back(self) -> None:
-        self.keycode(4, proto.ACTION_DOWN)
-        self.keycode(4, proto.ACTION_UP)
+    def back(self) -> bool:
+        ok = self.keycode(4, proto.ACTION_DOWN)
+        return self.keycode(4, proto.ACTION_UP) and ok
 
     def close(self) -> None:
         try:
@@ -712,7 +770,7 @@ class ScrcpySession:
         control_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self._video_sock = video
         self._control_sock = control_sock
-        self.control = ControlChannel(control_sock, *self.resolution)
+        self.control = ControlChannel(control_sock, *self.resolution, version=self.jar_version)
 
         if width and height and width > height:
             logger.warning(
@@ -1154,6 +1212,8 @@ class ScrcpyPySession:
         self.device_name = "scrcpy_py"
         self.display: Optional[DisplayInfo] = None
         self.control: Optional[ControlChannel] = None
+        #: py-scrcpy-client 0.4.x pins scrcpy-server 1.24
+        self.jar_version: Tuple[int, int, int] = (1, 24, 0)
         self._stop_flag = threading.Event()
 
     def start(self) -> "ScrcpyPySession":
@@ -1178,7 +1238,10 @@ class ScrcpyPySession:
             raise ADBError("py-scrcpy-client produced no frames")
 
         # Reuse the library's proven control socket, but through our own serializer.
-        self.control = ControlChannel(self.client.control_socket, *self.resolution)  # type: ignore[arg-type]
+        self.control = ControlChannel(
+            self.client.control_socket, *self.resolution,  # type: ignore[arg-type]
+            version=self.jar_version,
+        )
         self.control.set_screen_size(*self.resolution)
         return self
 

@@ -37,8 +37,10 @@ from cr_bot.arena.device_calibrator import (
 )
 from cr_bot.arena.grid import ArenaCalibration, ArenaGrid
 from cr_bot.brain.mk_zap_bait_brain import MKZapBaitBrain
+from cr_bot.brain.spell_targeting import aim_is_wasted, is_damage_spell, plan_cast
 from cr_bot.config.loader import BotConfig
 from cr_bot.models import BattleState, BotAction, GamePhase
+from cr_bot.ui.click_to_tap import ClickToTapController, ManualGesture, map_click_to_frame
 from cr_bot.ui.debug_hud import TacticalDebugHUD
 from cr_bot.ui_window import PreviewWindow
 from cr_bot.vision.arena_detector import HybridArenaDetector
@@ -78,6 +80,7 @@ class ClashRoyaleBotRunner:
         force_recalibrate: bool = False,
         deploy_retries: int = 2,
         verify_deploys: bool = True,
+        manual_input: bool = True,
     ) -> None:
         self.cfg = config
         self.show_hud = show_hud
@@ -130,6 +133,12 @@ class ClashRoyaleBotRunner:
 
         self._frames_seen = 0
         self._loop_times: List[float] = []
+
+        # Interactive viewer: a click in the preview window is a real touch on the phone.
+        self.manual_input = bool(manual_input) and not dry_run
+        self.clicker: Optional[ClickToTapController] = None
+        self._click_binding_frame: Optional[tuple] = None
+        self._hud_shown_size = (0, 0)
 
     # -- vision stack ---------------------------------------------------------------
     def _build_vision_stack(self, grid: ArenaGrid) -> None:
@@ -407,7 +416,7 @@ class ClashRoyaleBotRunner:
             time.sleep(0.03)
         return False
 
-    def submit_action(self, action: BotAction) -> bool:
+    def submit_action(self, action: BotAction, state: Optional[BattleState] = None) -> bool:
         """Queue a verified deployment (non-blocking)."""
         if self._busy:
             return False
@@ -421,11 +430,101 @@ class ClashRoyaleBotRunner:
             )
             arena_xy = clamped
 
+        # Last gate for a damage spell, against the frame this action was decided from: if the
+        # point we are about to tap no longer covers anything of value (the unit died, the swarm
+        # walked on, clamping moved the aim), drop the cast instead of feeding 2 elixir to an
+        # empty tile. The brain re-solves the aim before this; this is the belt-and-braces check
+        # for any other path that submits an action. Troops are untouched.
+        if state is not None and is_damage_spell(action.card_name):
+            tile = self.grid.pixel_to_tile(*arena_xy)
+            wasted, why = aim_is_wasted(action.card_name, tile[0], tile[1], state.enemy_units)
+            if wasted:
+                logger.info("Skipped wasted %s: %s", action.card_name, why)
+                return False
+
         with self._deploy_lock:
             self._pending_deploy = (action, slot_xy, arena_xy)
         self._busy = True
         self._start_deploy_worker()
         return True
+
+    # -- interactive viewer (click -> real tap) ---------------------------------------
+    def _hand_slot_at(self, point: Tuple[int, int]) -> Optional[int]:
+        """Which hand slot does a frame-space point fall on (or ``None``)."""
+        x, y = int(point[0]), int(point[1])
+        for slot in range(4):
+            x1, y1, x2, y2 = self.grid.hand_slot_rect(slot)
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                return slot
+        return None
+
+    def _ensure_clicker(self, frame: np.ndarray) -> ClickToTapController:
+        if self.clicker is None:
+            self.clicker = ClickToTapController(
+                frame_size=(frame.shape[1], frame.shape[0]),
+                perform=self.perform_manual_gesture,
+                hand_slot_of=self._hand_slot_at,
+                enabled=self.manual_input,
+            ).start()
+        self.clicker.set_frame_size(frame.shape[1], frame.shape[0])
+        return self.clicker
+
+    def _bind_mouse(self, preview: PreviewWindow, clicker: ClickToTapController,
+                    canvas_size: Tuple[int, int]) -> None:
+        """Install the OpenCV mouse callback once per window geometry.
+
+        The window shows the HUD *canvas* — the annotated capture frame with the telemetry
+        sidebar stacked on the right — so a click is first mapped from display pixels back to
+        canvas pixels, and only clicks that land on the capture-frame part of the canvas are
+        turned into gestures. A click on the sidebar is ignored instead of being teleported
+        into the right-hand edge of the arena.
+        """
+        key = (preview.name, canvas_size, clicker.frame_size)
+        if self._click_binding_frame == key:
+            return
+        self._click_binding_frame = key
+
+        def _on_mouse(event: int, x: int, y: int, flags: int, param) -> None:
+            if event not in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_RBUTTONDOWN):
+                return
+            rect = preview.image_rect()
+            canvas_point = map_click_to_frame(
+                x, y, preview.shown_size or canvas_size, canvas_size, rect
+            )
+            if canvas_point is None:
+                return
+            if event == cv2.EVENT_RBUTTONDOWN:
+                clicker.cancel()
+                return
+            if canvas_point[0] >= clicker.frame_size[0]:
+                return  # telemetry sidebar, not the game
+            clicker.handle_click(canvas_point[0], canvas_point[1], button="left")
+
+        try:
+            cv2.setMouseCallback(preview.name, _on_mouse)
+            logger.info(
+                "Interactive viewer ready: click the window to tap the phone, click a card "
+                "then the arena to deploy it, right-click cancels."
+            )
+        except Exception as exc:  # noqa: BLE001 - headless/odd backends must not be fatal
+            logger.warning("Could not bind clicks in the preview window: %s", exc)
+
+    def perform_manual_gesture(self, gesture: ManualGesture) -> bool:
+        """Inject a human-requested gesture (runs on the click worker thread)."""
+        result = None
+        if gesture.kind == "deploy" and gesture.start is not None:
+            result = self.adb.deploy_card(gesture.start, gesture.point)
+            logger.info(
+                "[manual] deploy %s -> %s via %s (%.0f ms)",
+                gesture.start,
+                gesture.point,
+                result.backend,
+                result.latency_ms,
+            )
+            return bool(result.ok)
+        result = self.adb.tap(*gesture.point, hold_ms=gesture.hold_ms)
+        logger.info("[manual] tap %s via %s (%.0f ms)", gesture.point, result.backend, result.latency_ms)
+        return bool(result.ok)
 
     # -- main loop -------------------------------------------------------------------
     def run_forever(self, max_matches: Optional[int] = None) -> None:
@@ -471,7 +570,7 @@ class ClashRoyaleBotRunner:
                         action = self.brain.decide(state)
                         if action is not None:
                             self._log_action(state, action, rel_ts)
-                            if self.submit_action(action):
+                            if self.submit_action(action, state):
                                 self.hud.record_action(action, rel_ts)
                 else:
                     self._handle_non_battle_screen(state.phase, rel_ts)
@@ -485,10 +584,18 @@ class ClashRoyaleBotRunner:
                     hud_img = self.hud.render(frame, state, self.brain.last_top_candidates, fps=fps_ema)
                     if self._preview is None:
                         self._preview = PreviewWindow(HUD_WINDOW_TITLE)
+                    canvas_size = (hud_img.shape[1], hud_img.shape[0])
+                    if self.manual_input:
+                        clicker = self._ensure_clicker(frame)
+                        clicker.render_overlay(hud_img)
+                        self._bind_mouse(self._preview, clicker, canvas_size)
                     self._preview.show(hud_img)  # scaled to fit the desktop, never upscaled
-                    if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q"):
                         logger.info("Quit requested from HUD.")
                         break
+                    if key == 27 and self.clicker is not None:  # Esc
+                        self.clicker.cancel()
 
                 sleep_rem = target_period - (time.monotonic() - t0)
                 if sleep_rem > 0:
@@ -498,6 +605,8 @@ class ClashRoyaleBotRunner:
             logger.info("Stopped by user.")
         finally:
             self._worker_stop.set()
+            if self.clicker is not None:
+                self.clicker.stop()
             if self.show_hud:
                 if self._preview is not None:
                     self._preview.close()

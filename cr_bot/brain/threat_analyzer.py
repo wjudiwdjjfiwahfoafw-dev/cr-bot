@@ -16,6 +16,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from cr_bot.arena.grid import ArenaGrid
+from cr_bot.brain.spell_targeting import (
+    DEFAULT_LEAD_SEC,
+    describe,
+    is_damage_spell,
+    plan_cast,
+    profile_for,
+)
 from cr_bot.config.cards_db import get_card_info
 from cr_bot.models import BattleState, DetectedUnit, Lane, MoveType, Side, WeightClass
 
@@ -483,9 +490,11 @@ class ThreatAnalyzer:
             if age < min_age and e.name in ("inferno_tower", "inferno_dragon", "sparky"):
                 continue
 
+            # Is anything of ours actually at risk from it? Measured from the board rather than
+            # checked against a list of card names, so a push made of anything at all counts.
             engaged_ally = any(
-                a.name in ("mega_knight", "miner", "skeleton_barrel", "inferno_dragon")
-                and math.hypot(a.tile_x - e.tile_x, a.tile_y - e.tile_y) <= 6.4
+                math.hypot(a.tile_x - e.tile_x, a.tile_y - e.tile_y) <= 6.4
+                and a.source != "pending"
                 for a in all_allies
             )
             if engaged_ally:
@@ -500,67 +509,46 @@ class ThreatAnalyzer:
                 if best is None or cand.value_score > best.value_score:
                     best = cand
 
-        # 2. Enemy swarm clusters (with lead-time intercept so moving Bats/Skarmy don't dodge!)
-        swarm_enemies = [
-            e
-            for e in state.enemy_units
-            if e.name not in NON_CATCHABLE_SPELLS
-            and e.hp_ratio > 0.22
-            and (
-                e.weight_class == WeightClass.SWARM
-                or e.name in ("skeleton_army", "bats", "goblin_barrel", "spear_goblins", "skeletons", "goblins")
-            )
+        # 2. Swarms and clusters: ask the solver where the *disc* should go.
+        #
+        # This used to pick one anchor unit and cast on it, which threw away the empty-tile
+        # play (a Skeleton Army spread around a tile is best Zapped *between* its members) and
+        # punished tight clusters by only ever covering the anchor plus what happened to fall
+        # inside the radius from that point. The solver scores candidate centres by what the
+        # blast covers, so the empty tile wins when it really is the better cast, and a moving
+        # unit is led by its own velocity rather than by a fixed constant.
+        defenders = [a for a in all_allies if a.source != "pending"]
+        towers = [
+            (tower.name, "enemy" if tower.side is Side.ENEMY else "ally", tower.tile_x, tower.tile_y)
+            for tower in state.towers.values()
+            if tower.alive
         ]
-        for anchor in swarm_enemies:
-            # Do not prematurely zap an in-flight Goblin Barrel before 0.48s!
-            if anchor.name == "goblin_barrel" and anchor.source == "sim":
-                if (state.timestamp - anchor.first_seen_ts) < 0.48 and abs(anchor.vx) < 0.05 and abs(anchor.vy) < 0.05:
-                    # Check if it's still thePendingSpell projectile (not yet spawned barrel_goblins)
-                    if anchor.pixel_bbox[2] - anchor.pixel_bbox[0] == 32:
-                        continue
-
-            zx, zy = self.predict_intercept_tile(anchor, card_delay_sec=0.45)
-            cluster = [
-                o
-                for o in swarm_enemies
-                if math.hypot(o.tile_x - anchor.tile_x, o.tile_y - anchor.tile_y) <= self.ZAP_RADIUS
-            ]
-            near_our_tower = anchor.tile_y >= 21.5
-            near_ally_push = any(
-                math.hypot(a.tile_x - anchor.tile_x, a.tile_y - anchor.tile_y) <= 3.8 and a.source != "pending"
-                for a in all_allies
+        zap_profile = profile_for("zap")
+        if zap_profile is not None:
+            cover = plan_cast(
+                "zap",
+                state.enemy_units,
+                defenders,
+                towers,
+                lead_sec=DEFAULT_LEAD_SEC + self.adb_latency_sec,
             )
-            if not (near_our_tower or near_ally_push):
-                continue
-
-            # Do NOT double-spend Zap if Goblin Gang / MK was ALREADY dropped onto this exact tower swarm!
-            already_covered_by_pending = any(
-                a.source == "pending"
-                and a.name in ("goblin_gang", "mega_knight", "bats", "zap")
-                and math.hypot(a.tile_x - anchor.tile_x, a.tile_y - anchor.tile_y) <= 3.5
-                for a in all_allies
-            )
-            if already_covered_by_pending:
-                continue
-
-            base_val = 0.0
-            if anchor.name in ("skeleton_army", "goblin_barrel") and len(cluster) >= 2:
-                base_val = 85.0 if near_our_tower else 78.0
-            elif anchor.name == "goblin_barrel":
-                base_val = 83.0
-            elif anchor.name == "bats" and (near_our_tower or near_ally_push):
-                base_val = 73.0
-            elif len(cluster) >= 3 or (len(cluster) >= 2 and near_ally_push):
-                base_val = 66.0 + 3.5 * min(6, len(cluster))
-
-            if base_val > 0 and (best is None or base_val > best.value_score):
-                best = ZapOpportunity(
-                    tile_x=zx,
-                    tile_y=zy,
-                    value_score=base_val,
-                    is_reset=False,
-                    reason=f"Lead-predicted Zap clear ({anchor.name}) protecting {'tower' if near_our_tower else 'push'}",
+            if cover is not None:
+                # distance from our half: a clear on our side of the river is worth more than a
+                # chip on theirs, and a defence that also saves a push is worth more again
+                threat = max(0.0, min(1.0, (cover.tile_y - 14.0) / 12.0))
+                engaged = any(
+                    math.hypot(a.tile_x - cover.tile_x, a.tile_y - cover.tile_y) <= 3.8
+                    for a in defenders
                 )
+                value = cover.value * (0.75 + 0.55 * threat) * (1.15 if engaged else 1.0)
+                if value > 0.0 and (best is None or value > best.value_score):
+                    best = ZapOpportunity(
+                        tile_x=cover.tile_x,
+                        tile_y=cover.tile_y,
+                        value_score=value,
+                        is_reset=False,
+                        reason=describe(cover, zap_profile),
+                    )
 
         return best
 

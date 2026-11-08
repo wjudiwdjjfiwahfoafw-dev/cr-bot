@@ -27,6 +27,21 @@ Usage::
     python3 scripts/fetch_game_sprites.py --force          # rebuild everything
     python3 scripts/fetch_game_sprites.py --only mega_knight,giant --frames 12
     python3 scripts/fetch_game_sprites.py --contact-sheet  # also write assets/unit_sprites/_contact_sheet.png
+    python3 scripts/fetch_game_sprites.py --balance-factions --force
+
+Why ``--balance-factions`` exists
+---------------------------------
+The upstream dump keeps **both** team tints in one character directory: the game paints the team
+colour onto the unit's clothing, so a Lumberjack ships with a blue jacket *and* a red jacket, a
+Knight with a blue scarf *and* a red scarf.  Selecting simply the most visually *diverse* frames —
+which is what this script used to do — therefore collects a mix of factions by accident, and for
+many cards only one tint by accident as well (the Giant, Hog Rider, Minions and Bats are entirely
+one faction).
+
+``--balance-factions`` measures each candidate's faction (``cr_bot.vision.sprite_factions``, pure
+colour arithmetic) and then keeps half the frames from each faction.  A lane that shows an ally
+Giant is then matched against an ally-tinted Giant, and the same reference set works for both
+teams.  The per-frame measurement is written to ``assets/unit_sprites/_factions.json``.
 """
 
 from __future__ import annotations
@@ -46,6 +61,14 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from cr_bot.vision.sprite_factions import (  # noqa: E402  (after sys.path setup)
+    ALLY,
+    ENEMY,
+    audit_library,
+    frame_faction,
+    write_faction_map,
+)
 
 RAW = "https://raw.githubusercontent.com/smlbiobot/cr-assets-png/master/{path}"
 TREE_API = "https://api.github.com/repos/smlbiobot/cr-assets-png/git/trees/master?recursive=1"
@@ -236,6 +259,44 @@ def select_diverse(frames: Sequence[Frame], keep: int, min_dist: float = 0.06) -
     return [frames[i] for i in chosen]
 
 
+def select_balanced(frames: Sequence[Frame], keep: int) -> List[Frame]:
+    """Keep half the frames from each faction, so both team tints are represented.
+
+    Diversity is still maximised *within* each faction — pose coverage is what makes template
+    matching work — but faction is no longer allowed to be the thing that makes two frames
+    "different".  Cards that only have one tint upstream keep the old behaviour, and neutral
+    frames (grey stone, bone) are used to fill any remaining slots because they suit both teams.
+    """
+    ally: List[Frame] = []
+    enemy: List[Frame] = []
+    neutral: List[Frame] = []
+    for frame in frames:
+        faction = frame_faction(frame[1]).faction
+        (ally if faction == ALLY else enemy if faction == ENEMY else neutral).append(frame)
+
+    chosen: List[Frame] = []
+    if ally and enemy:
+        chosen += select_diverse(ally, max(1, keep // 2))
+        chosen += select_diverse(enemy, keep - max(1, keep // 2))
+    elif ally or enemy:
+        chosen += select_diverse(ally or enemy, keep)
+    remaining = keep - len(chosen)
+    if remaining > 0 and neutral:
+        chosen += select_diverse(neutral, remaining)
+    if not chosen:
+        chosen = select_diverse(frames, keep)
+    # keep the original frame order so file names stay stable and reviewable
+    order = {id(f): i for i, f in enumerate(frames)}
+    unique: List[Frame] = []
+    seen = set()
+    for frame in sorted(chosen, key=lambda f: order.get(id(f), 0)):
+        if frame[0] in seen:
+            continue
+        seen.add(frame[0])
+        unique.append(frame)
+    return unique[:keep]
+
+
 def build_card(
     card: str,
     directory: str,
@@ -246,6 +307,7 @@ def build_card(
     max_side: int,
     force: bool,
     verbose: bool,
+    balance: bool = False,
 ) -> Optional[dict]:
     card_dir = out_root / card
     if card_dir.is_dir() and not force and any(card_dir.glob("*.png")):
@@ -294,7 +356,7 @@ def build_card(
             print(f"  ! {card:<18} every frame rejected by the size filter")
         return None
 
-    chosen = select_diverse(decoded, frames_wanted)
+    chosen = select_balanced(decoded, frames_wanted) if balance else select_diverse(decoded, frames_wanted)
     card_dir.mkdir(parents=True, exist_ok=True)
     for old in card_dir.glob("*.png"):
         old.unlink()
@@ -305,10 +367,19 @@ def build_card(
         if ok:
             (card_dir / name).write_bytes(buf.tobytes())
             names.append(name)
+    factions = {f"f{i:02d}.png": frame_faction(img).faction for i, (_idx, img) in enumerate(chosen)}
+    entry: dict = {"dir": directory, "frames": names}
+    if balance:
+        entry["factions"] = factions
+        ally_n = sum(1 for v in factions.values() if v == ALLY)
+        enemy_n = sum(1 for v in factions.values() if v == ENEMY)
+        entry["faction_split"] = {"ally": ally_n, "enemy": enemy_n}
+        if verbose:
+            print(f"  {card:<18} factions: ally={ally_n} enemy={enemy_n}")
     if verbose:
         sizes = ", ".join(f"{img.shape[1]}x{img.shape[0]}" for _i, img in chosen[:3])
         print(f"  {card:<18} {len(names)} frame(s) from {len(decoded)}/{len(picks)} candidates  ({sizes} ...)")
-    return {"dir": directory, "frames": names}
+    return entry
 
 
 def contact_sheet(out_root: Path, manifest: dict, path: Path, cell: int = 56) -> None:
@@ -348,6 +419,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--candidates", type=int, default=36, help="frames sampled per card before selection")
     ap.add_argument("--max-side", type=int, default=96)
     ap.add_argument("--contact-sheet", action="store_true")
+    ap.add_argument("--balance-factions", action="store_true",
+                    help="keep half the frames from each team tint (recommended)")
     args = ap.parse_args(argv)
 
     root = Path(args.root)
@@ -384,12 +457,26 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"  ! {card:<18} directory {directory} not found in the listing")
             continue
         entry = build_card(card, directory, frame_paths, out_root, args.frames, args.candidates,
-                           args.max_side, args.force, verbose=True)
+                           args.max_side, args.force, verbose=True,
+                           balance=args.balance_factions)
         if entry:
             manifest[card] = entry
             done += 1
 
     manifest_path.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+    # the faction of every frame is measured from the frames themselves, so the map is always
+    # regenerated rather than trusted from a previous run
+    try:
+        from datetime import datetime, timezone
+
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        audits = audit_library(out_root)
+        faction_path = write_faction_map(out_root, audits, stamp)
+        mixed = sum(1 for a in audits if a.is_mixed)
+        print(f"faction map -> {faction_path} ({len(audits)} cards, {mixed} hold both tints)")
+    except Exception as exc:  # pragma: no cover - never fail a fetch over reporting
+        print(f"! could not write the faction map ({exc})")
     total = sum(p.stat().st_size for p in out_root.rglob("*.png"))
     print(f"{done} card(s) built, {len(manifest)} in manifest, {total/1e6:.2f} MB, manifest -> {manifest_path}")
     if args.contact_sheet:

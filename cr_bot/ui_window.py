@@ -165,10 +165,12 @@ def fit_image(
 
 
 class PreviewWindow:
-    """An OpenCV window that always fits on screen.
+    """An OpenCV window that always fits on screen, and can report where a click landed.
 
     ``scale`` is the factor applied to the last shown image, so callers that accept mouse
-    input (the tower picker) can map click coordinates back to frame coordinates.
+    input (the tower picker, the click-to-tap viewer) can map click coordinates back to frame
+    coordinates. :meth:`image_rect` additionally asks the window manager where the image
+    actually sits, which stays correct after the user resizes or maximises the window.
     """
 
     def __init__(
@@ -184,6 +186,8 @@ class PreviewWindow:
         self.height_fraction = height_fraction
         self.width_fraction = width_fraction
         self.scale: float = 1.0
+        self.shown_size: Tuple[int, int] = (0, 0)
+        self.frame_size: Tuple[int, int] = (0, 0)
         self._size: Optional[Tuple[int, int]] = None
         cv2.namedWindow(name, cv2.WINDOW_NORMAL if resizable else cv2.WINDOW_AUTOSIZE)
 
@@ -197,8 +201,10 @@ class PreviewWindow:
             width_fraction=self.width_fraction,
         )
         h, w = shown.shape[:2]
-        src_h = image.shape[0]
+        src_h, src_w = image.shape[0], image.shape[1]
         self.scale = (h / float(src_h)) if src_h else 1.0
+        self.shown_size = (int(w), int(h))
+        self.frame_size = (int(src_w), int(src_h))
         if self._size != (w, h):
             # Set the window size once per geometry change; the image itself is already
             # scaled, so the window never has to grow beyond the screen.
@@ -206,6 +212,21 @@ class PreviewWindow:
             self._size = (w, h)
         cv2.imshow(self.name, shown)
         return shown
+
+    def image_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        """``(x, y, w, h)`` of the displayed image inside the window, if OpenCV can tell us."""
+        import cv2  # noqa: PLC0415
+
+        getter = getattr(cv2, "getWindowImageRect", None)
+        if getter is None:
+            return None
+        try:
+            x, y, w, h = getter(self.name)
+        except Exception:  # noqa: BLE001 - backend without the call, or window already gone
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        return (int(x), int(y), int(w), int(h))
 
     def close(self) -> None:
         import cv2  # noqa: PLC0415

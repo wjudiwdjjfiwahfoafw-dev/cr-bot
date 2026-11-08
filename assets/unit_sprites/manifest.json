@@ -27,6 +27,14 @@
  },
  "balloon": {
   "dir": "chr_balloon_out",
+  "faction_split": {
+   "ally": 2,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png"
@@ -34,6 +42,20 @@
  },
  "bandit": {
   "dir": "chr_bandit_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -47,6 +69,20 @@
  },
  "barbarian_barrel": {
   "dir": "chr_barbarian_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -60,6 +96,20 @@
  },
  "barbarians": {
   "dir": "chr_barbarian_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -73,6 +123,20 @@
  },
  "bats": {
   "dir": "chr_bats_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -86,6 +150,19 @@
  },
  "battle_ram": {
   "dir": "chr_battle_ram_out",
+  "faction_split": {
+   "ally": 3,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -93,14 +170,22 @@
    "f03.png",
    "f04.png",
    "f05.png",
-   "f06.png",
-   "f07.png"
+   "f06.png"
   ]
  },
  "bomb_tower": {
   "dir": "building_bomb_tower_out",
+  "faction_split": {
+   "ally": 1,
+   "enemy": 1
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "ally"
+  },
   "frames": [
-   "f00.png"
+   "f00.png",
+   "f01.png"
   ]
  },
  "bomber": {
@@ -118,6 +203,20 @@
  },
  "bowler": {
   "dir": "chr_bowler_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -144,6 +243,20 @@
  },
  "dark_prince": {
   "dir": "chr_black_knight_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 2
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "neutral",
+   "f05.png": "neutral",
+   "f06.png": "enemy",
+   "f07.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -183,6 +296,20 @@
  },
  "executioner": {
   "dir": "chr_axe_man_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -196,6 +323,20 @@
  },
  "fire_spirit": {
   "dir": "chr_fire_firespirit_out",
+  "faction_split": {
+   "ally": 0,
+   "enemy": 8
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "enemy",
+   "f07.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -222,6 +363,20 @@
  },
  "giant": {
   "dir": "chr_giant_out",
+  "faction_split": {
+   "ally": 0,
+   "enemy": 8
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "enemy",
+   "f07.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -248,6 +403,20 @@
  },
  "goblin_gang": {
   "dir": "chr_goblin_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -261,8 +430,17 @@
  },
  "goblin_hut": {
   "dir": "building_goblin_hut_out",
+  "faction_split": {
+   "ally": 1,
+   "enemy": 1
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "enemy"
+  },
   "frames": [
-   "f00.png"
+   "f00.png",
+   "f01.png"
   ]
  },
  "goblins": {
@@ -306,6 +484,20 @@
  },
  "hog_rider": {
   "dir": "chr_hog_rider_out",
+  "faction_split": {
+   "ally": 0,
+   "enemy": 8
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "enemy",
+   "f07.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -319,6 +511,20 @@
  },
  "ice_spirit": {
   "dir": "chr_ice_spirits_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -332,6 +538,20 @@
  },
  "ice_wizard": {
   "dir": "chr_ice_wizard_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 2
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "neutral",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "ally",
+   "f07.png": "neutral"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -345,6 +565,20 @@
  },
  "knight": {
   "dir": "chr_knight_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 3
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "neutral",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -371,6 +605,20 @@
  },
  "lumberjack": {
   "dir": "chr_rage_barbarian_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "ally",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -397,6 +645,20 @@
  },
  "mega_minion": {
   "dir": "chr_mega_minion_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -410,6 +672,20 @@
  },
  "miner": {
   "dir": "chr_miner_out",
+  "faction_split": {
+   "ally": 0,
+   "enemy": 8
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "enemy",
+   "f07.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -423,6 +699,20 @@
  },
  "mini_pekka": {
   "dir": "chr_mini_pekka_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -436,6 +726,20 @@
  },
  "minion_horde": {
   "dir": "chr_minion_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -449,6 +753,20 @@
  },
  "minions": {
   "dir": "chr_minion_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -462,13 +780,37 @@
  },
  "mortar": {
   "dir": "building_mortar_out",
+  "faction_split": {
+   "ally": 2,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "neutral"
+  },
   "frames": [
    "f00.png",
-   "f01.png"
+   "f01.png",
+   "f02.png"
   ]
  },
  "musketeer": {
   "dir": "chr_musketeer_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -482,6 +824,20 @@
  },
  "pekka": {
   "dir": "chr_pekka_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -508,6 +864,20 @@
  },
  "princess": {
   "dir": "chr_princess_out",
+  "faction_split": {
+   "ally": 1,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "ally",
+   "f04.png": "enemy",
+   "f05.png": "neutral",
+   "f06.png": "neutral",
+   "f07.png": "neutral"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -534,6 +904,20 @@
  },
  "royal_hogs": {
   "dir": "chr_hog_rider_out",
+  "faction_split": {
+   "ally": 0,
+   "enemy": 8
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "enemy",
+   "f05.png": "enemy",
+   "f06.png": "enemy",
+   "f07.png": "enemy"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -547,6 +931,20 @@
  },
  "skeleton_army": {
   "dir": "chr_skeleton_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -560,6 +958,20 @@
  },
  "skeletons": {
   "dir": "chr_skeleton_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -573,6 +985,20 @@
  },
  "sparky": {
   "dir": "chr_zap_machine_out",
+  "faction_split": {
+   "ally": 0,
+   "enemy": 2
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "neutral",
+   "f02.png": "enemy",
+   "f03.png": "neutral",
+   "f04.png": "neutral",
+   "f05.png": "neutral",
+   "f06.png": "neutral",
+   "f07.png": "neutral"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -586,6 +1012,20 @@
  },
  "tesla": {
   "dir": "building_tesla_out",
+  "faction_split": {
+   "ally": 4,
+   "enemy": 4
+  },
+  "factions": {
+   "f00.png": "enemy",
+   "f01.png": "enemy",
+   "f02.png": "enemy",
+   "f03.png": "enemy",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -625,6 +1065,20 @@
  },
  "witch": {
   "dir": "chr_witch_out",
+  "faction_split": {
+   "ally": 8,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "ally",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",
@@ -651,6 +1105,20 @@
  },
  "x_bow": {
   "dir": "building_xbow_out",
+  "faction_split": {
+   "ally": 7,
+   "enemy": 0
+  },
+  "factions": {
+   "f00.png": "neutral",
+   "f01.png": "ally",
+   "f02.png": "ally",
+   "f03.png": "ally",
+   "f04.png": "ally",
+   "f05.png": "ally",
+   "f06.png": "ally",
+   "f07.png": "ally"
+  },
   "frames": [
    "f00.png",
    "f01.png",

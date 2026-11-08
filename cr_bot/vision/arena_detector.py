@@ -264,12 +264,19 @@ class ArenaUnitBackend:
         self.enable_identity = enable_identity
         self.last_bars: List[HealthBar] = []
         self.stats = DetectorStats()
+        #: how many appearance samples have been learned from verified (own) deployments
+        self.learned_samples: int = 0
 
     def reset(self) -> None:
         self.segmenter.reset()
         self.stats = DetectorStats()
 
     # -- main entry ----------------------------------------------------------------
+    #: a segmentation blob this uncertain, with no health bar to confirm it, is dropped
+    MIN_CONFIDENCE = 0.30
+    #: two detections of the same side this close together are one unit, not two
+    DEDUPE_TILES = 0.75
+
     def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
         units: List[BlobUnit] = []
         if self.enable_segmentation:
@@ -277,19 +284,69 @@ class ArenaUnitBackend:
             self.last_bars = self.segmenter.last_bars
         if not units:
             # Nothing moving was found: either the background model is still warming up or the
-            # arena is genuinely empty (a spell lands, an elixir bar animates). Bars cover both.
+            # arena is genuinely empty. Bars cover both cases (and are the only signal that
+            # survives a stationary unit on the very first frames).
             return self._detect_bars_only(frame_bgr, grid)
-        out = [self._describe(unit, frame_bgr, grid) for unit in units]
+
+        described = [u for u in units if self._keep(u)]
+        out = [self._describe(unit, frame_bgr, grid) for unit in described]
+        out = self._dedupe(out, grid)
         self._remember(out, frame_bgr, grid)
-        self.stats.add(units, bars=len(self.last_bars),
+        self.stats.add(described, bars=len(self.last_bars),
                        identified=sum(1 for d in out if not d.name.startswith("unknown_")))
         return out
+
+    def _keep(self, unit: BlobUnit) -> bool:
+        """Drop detections that are not backed by enough evidence to act on.
+
+        A blob can be a troop, or it can be a spell splat, a spawn animation, a Bush that just
+        rustled, or the dust from a destroyed tower. The old code accepted all of them, which
+        is where "detected as multiple troops" and "phantom enemies" came from. A health bar is
+        proof of a real unit, so a bar-backed blob is always kept.
+        """
+        if unit.has_bar:
+            return True
+        return unit.confidence >= self.MIN_CONFIDENCE
+
+    def _dedupe(self, detections: List[RawDetection], grid: ArenaGrid) -> List[RawDetection]:
+        """Collapse two detections of the same side that describe one unit.
+
+        Segmentation and the bar fallback can both find the same troop, and a sprite can flicker
+        into two blobs when a limb detaches for one frame. Keeping both makes the board look
+        twice as threatening as it is, which is exactly how a bot wastes elixir.
+        """
+        ordered = sorted(
+            detections,
+            key=lambda d: (d.hp_ratio != 1.0, d.confidence, d.weight_class != WeightClass.SWARM),
+            reverse=True,
+        )
+        kept: List[RawDetection] = []
+        for det in ordered:
+            duplicate = False
+            for other in kept:
+                if other.side != det.side:
+                    continue
+                dist = math.hypot(other.tile_x - det.tile_x, other.tile_y - det.tile_y)
+                if dist <= self.DEDUPE_TILES and (
+                    other.name == det.name or det.name.startswith("unknown_")
+                    or other.name.startswith("unknown_")
+                ):
+                    duplicate = True
+                    # let the confirmed one win, but keep the best confidence
+                    if det.confidence > other.confidence:
+                        other.confidence = det.confidence
+                    break
+            if not duplicate:
+                kept.append(det)
+        return kept
 
     def _describe(self, unit: BlobUnit, frame_bgr: np.ndarray, grid: ArenaGrid) -> RawDetection:
         name = unit.fallback_label
         move_type = MoveType.GROUND
         weight = unit.weight_class
-        confidence = 0.55 + 0.25 * min(1.0, unit.side_confidence)
+        # confidence now reflects how much *evidence* there is (segmentation solidity, team
+        # vote, bar support) instead of a fixed 0.55-0.8 that made every guess look solid.
+        confidence = float(unit.confidence)
         source = "segmentation"
 
         if self.enable_identity and self.identity is not None and self.identity.sample_count:
@@ -326,19 +383,63 @@ class ArenaUnitBackend:
         y2 = min(frame_bgr.shape[0], y2)
         return frame_bgr[y1:y2, x1:x2]
 
-    def _remember(self, detections: List[RawDetection], frame_bgr: np.ndarray, grid: ArenaGrid) -> None:
-        """Learn confirmed identities: a named detection strengthens its own reference set."""
+    #: a sample is only stored when the detection is this well supported
+    LEARN_MIN_CONFIDENCE = 0.80
+    #: only learn from our own units: we know what we deployed, so the label is verifiable
+    LEARN_SIDES = ("ally",)
+
+    def _remember(self, detections: List[RawDetection], frame_bgr: np.ndarray,
+                  grid: ArenaGrid) -> None:
+        """Learn a card's appearance — but only from detections whose *label is verified*.
+
+        This used to store every confident detection, which turned a single mistake into a
+        permanent one: a Wizard read as a Musketeer was written into the library as a Musketeer
+        sample, and from then on the matcher agreed with the mistake. Worse, a detection that
+        already *came from* the library was fed straight back in, so a wrong label could
+        reinforce itself frame after frame.
+
+        The label is only trustworthy when we produced it ourselves: an **ally** unit is one the
+        bot just deployed, so its card is known from the hand, not guessed. Enemy detections are
+        never used as training data. On top of that the detection must be clean — full HP (no
+        damage tint or overlapping health bar) and strongly supported by the detector (a bar or
+        good segmentation).
+        """
         if self.identity is None or not self.enable_identity:
             return
         for det in detections:
-            if det.name.startswith("unknown_") or det.confidence < 0.7:
+            if det.name.startswith("unknown_"):
                 continue
-            self.identity.add_from_frame(det.name, frame_bgr, det.pixel_bbox)
+            if getattr(det.side, "value", str(det.side)) not in self.LEARN_SIDES:
+                continue
+            if det.confidence < self.LEARN_MIN_CONFIDENCE:
+                continue
+            if det.hp_ratio < 0.99:
+                continue      # damaged sprite: bar and damage flash pollute the patch
+            if det.source not in ("segmentation", "segmentation+identity"):
+                continue
+            if self.identity.add_from_frame(det.name, frame_bgr, det.pixel_bbox):
+                self.learned_samples += 1
 
     # -- fallback while the background model warms up ------------------------------
+    #: a unit bar is at least this wide (tiles); anything thinner is tower decoration,
+    #: a level badge, or a piece of the UI
+    MIN_FALLBACK_BAR_TILES = 0.22
+
     def _detect_bars_only(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        """Last-resort detection from health bars alone.
+
+        This runs when segmentation has nothing to say: the first frames of a match, or a frame
+        where everything is standing still. It reads the *bars* the game draws above units.
+
+        The trap here is that tower HP bars and tower decorations look exactly like unit bars,
+        and a permissive reader finds two dozen of them on a real frame. Reporting those as
+        troops is the "detected as multiple troops" complaint in its purest form: the brain sees
+        an army that is not there and empties its elixir. So the fallback is strict — wide bars
+        only, towers excluded — and its output is marked low confidence.
+        """
         ppt = pixels_per_tile(grid)
-        bars = self.segmenter.last_bars or self.bar_reader.read(frame_bgr, grid, ppt)
+        bars = self.bar_reader.read(frame_bgr, grid, ppt,
+                                    min_width_tiles=self.MIN_FALLBACK_BAR_TILES)
         self.last_bars = bars
         out: List[RawDetection] = []
         foot_offset = self.BAR_TO_FOOT_TILES * ppt
@@ -349,7 +450,8 @@ class ArenaUnitBackend:
             tx, ty = grid.pixel_to_tile(cx, foot_y)
             if not (0.0 <= tx <= grid.TILES_X and 0.0 <= ty <= grid.TILES_Y):
                 continue
-            # a real device draws unit bars between ~0.2 and ~2.8 tiles wide
+            if self._near_tower(grid, tx, ty):
+                continue    # tower HP bar, not a troop
             width_tiles = bar.total_width / ppt
             weight, label = classify_size(max(0.5, width_tiles * 1.6))
             out.append(
@@ -359,14 +461,21 @@ class ArenaUnitBackend:
                     tile_x=float(tx),
                     tile_y=float(ty),
                     pixel_bbox=(int(x1 - 0.5 * ppt), int(y2), int(x2 + 0.5 * ppt), int(foot_y)),
-                    confidence=0.5,
+                    confidence=0.45,
                     hp_ratio=round(float(bar.hp_ratio), 2),
                     move_type=MoveType.GROUND,
                     weight_class=weight,
                     source="bars",
                 )
             )
-        return out
+        return self._dedupe(out, grid)
+
+    @staticmethod
+    def _near_tower(grid: ArenaGrid, tile_x: float, tile_y: float, radius_tiles: float = 2.2) -> bool:
+        for tower_x, tower_y in grid.TOWER_TILES.values():
+            if math.hypot(tile_x - tower_x, tile_y - tower_y) <= radius_tiles:
+                return True
+        return False
 
     @staticmethod
     def infer_side_around_bbox(frame_bgr: np.ndarray, bbox: Tuple[int, int, int, int]) -> Side:
@@ -391,7 +500,17 @@ class HybridArenaDetector:
     """Fuses YOLOv8/ONNX detections with OpenCV health-bar detections and tracks unit velocities."""
 
     MAX_MATCH_TILE_DIST = 2.7
-    TRACK_TTL_SEC = 0.85
+    #: How long a track survives without being re-detected.
+    #:
+    #: This used to be 0.35s, and every blink of the detector — one dropped frame, a unit
+    #: passing under a tower, a spell flash — killed the track. The next frame re-detected the
+    #: same troop with a *new* track id, which resets ``first_seen_ts`` (so time-based logic
+    #: like the Inferno reset window restarts), resets the smoothed velocity to zero, and makes
+    #: the brain's elixir/cycle accounting count the same enemy card again. A track must
+    #: outlive a few missed frames instead.
+    TRACK_TTL_SEC = 1.6
+    #: a track that has not been seen for this long is reported with reduced confidence
+    STALE_AFTER_SEC = 0.45
 
     def __init__(
         self,
@@ -549,10 +668,20 @@ class HybridArenaDetector:
         for tid in expired:
             del self._tracks[tid]
 
-        # Return currently active or very recently seen (< 0.35s) units
-        return [
-            tr for tr in self._tracks.values() if (now_ts - tr.last_seen_ts) <= 0.35
-        ]
+        # Report live tracks; ones that were missed for a few frames stay in the board (so the
+        # brain does not forget a push mid-fight) but are marked less certain.
+        out: List[DetectedUnit] = []
+        for tr in self._tracks.values():
+            missed = now_ts - tr.last_seen_ts
+            if missed > self.TRACK_TTL_SEC:
+                continue
+            if missed > self.STALE_AFTER_SEC:
+                tr.confidence = round(max(0.2, tr.confidence * 0.92), 3)
+                # a stale track cannot be trusted to still be moving
+                tr.vx *= 0.6
+                tr.vy *= 0.6
+            out.append(tr)
+        return out
 
     @staticmethod
     def _refine_generic_class(unit: DetectedUnit) -> None:

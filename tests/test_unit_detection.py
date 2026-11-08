@@ -411,3 +411,222 @@ def test_sprite_library_ships_real_game_frames() -> None:
             assert frame.mask.sum() > 80
             assert frame.gray.shape == frame.mask.shape
             assert 0.2 < frame.aspect < 5.0, "sprite frames must be character-shaped"
+
+
+# ======================================================================================
+# scenario tests: the three complaints from the bug report, as executable cases
+#
+#   * a single troop must not be reported twice      (duplicate detections)
+#   * a cluster must not be reported once            (merged detections)
+#   * an ally must not be reported as an enemy       (side confusion)
+#
+# These were originally a throwaway script; they live here so a regression is caught by pytest.
+# ======================================================================================
+
+def _warm(det: BlobUnitDetector, grid: ArenaGrid, frames: int = 4) -> np.ndarray:
+    base = _arena_background()
+    for _ in range(frames):
+        det.detect(base, grid)
+    return base
+
+
+def _health_bar(scene: np.ndarray, cx: int, top: int, ppt: float,
+                side: str = "enemy", filled: float = 1.0,
+                width_tiles: float = 1.1) -> np.ndarray:
+    """Draw a unit health bar: a dark capsule with a team-coloured fill inside it.
+
+    The game always frames a bar in dark pixels and floats it a few pixels clear of the sprite;
+    the reader requires both (it is what keeps the arena floor out of the bar mask), so the
+    fixture has to render it that way to be a fair test.
+    """
+    out = scene.copy()
+    half = max(5, int(round(0.5 * width_tiles * ppt)))
+    # real bars are thin: ~0.1 tiles tall at this resolution (~4 px on a 720p capture)
+    bar_h = max(3, int(round(0.10 * ppt)))
+    fill = (40, 40, 235) if side == "enemy" else (235, 80, 40)
+    # dark capsule, then the fill inset by a pixel so the outline survives
+    cv2.rectangle(out, (cx - half - 1, top - 1), (cx + half + 1, top + bar_h + 1),
+                  (32, 30, 34), -1)
+    width = int(round((2 * half) * max(0.0, min(1.0, filled))))
+    if width > 0:
+        cv2.rectangle(out, (cx - half, top), (cx - half + width, top + bar_h), fill, -1)
+    return out
+
+
+def _enemy_bars(scene: np.ndarray, boxes, ppt: float,
+                bar_tiles: float = 1.1) -> np.ndarray:
+    """One red bar above each sprite box, ``bar_tiles`` wide."""
+    out = scene.copy()
+    gap = max(4, int(round(0.14 * ppt)))
+    bar_h = max(3, int(round(0.10 * ppt)))
+    for (x1, y1, x2, y2) in boxes:
+        cx = (x1 + x2) // 2
+        # leave two clear rows between the bar's capsule and the sprite
+        out = _health_bar(out, cx, y1 - bar_h - gap, ppt, side="enemy", width_tiles=bar_tiles)
+    return out
+
+
+def test_a_stationary_troop_stays_detected_frame_after_frame() -> None:
+    """Persistence: the detector must not 'learn away' a unit that stops moving.
+
+    This is the false-negative the old code produced constantly — a troop that reached the tower
+    and stood still was absorbed into the background model and vanished from the board.
+    """
+    grid = ArenaGrid(720, 1280, _flat_calibration())
+    ppt = pixels_per_tile(grid)
+    det = BlobUnitDetector()
+    base = _warm(det, grid)
+
+    scene = _paste(base, _sprite("musketeer"), 250, 120, int(2.2 * ppt), tint="ally")
+    counts = [len(det.detect(scene, grid)) for _ in range(20)]
+    assert all(c == 1 for c in counts), f"unit flickered or duplicated over 20 frames: {counts}"
+
+
+def test_a_swarm_is_split_into_one_unit_per_health_bar() -> None:
+    """Duplicate/merged: six skeletons standing together are six units, not one medium blob."""
+    grid = ArenaGrid(720, 1280, _flat_calibration())
+    ppt = pixels_per_tile(grid)
+    det = BlobUnitDetector()
+    base = _warm(det, grid)
+
+    skeleton = _sprite("skeletons", 0)
+    size = int(0.7 * ppt)
+    # a real swarm is a loose 2-D cluster, not a row: the units stand at slightly different
+    # depths, which is also what keeps their bars from merging into one long strip
+    positions = [(200, 150), (246, 142), (292, 154), (222, 186), (268, 190)]
+    scene = base
+    boxes = []
+    for x, y in positions:
+        scene = _paste(scene, skeleton, x, y, size, tint="enemy")
+        boxes.append((x, y, x + size, y + size))
+    # the game draws one bar per unit; without them a cluster is genuinely ambiguous, so the
+    # scenario has to include them for the split to have anything to split on
+    scene = _enemy_bars(scene, boxes, ppt, bar_tiles=0.35)
+
+    units = det.detect(scene, grid)
+    assert len(units) >= 4, f"a 5-unit swarm collapsed into {len(units)} detections"
+    assert all(u.side is Side.ENEMY for u in units)
+    assert all(u.weight_class is WeightClass.SWARM for u in units), (
+        "split swarm members must be sized as swarms, not as one big unit")
+
+
+def test_enemy_artwork_on_an_ally_ring_is_reported_as_ally() -> None:
+    """Side confusion: the team ring is painted by the game, so it outranks the card's own hues.
+
+    A red-skinned card on your half of the arena stands on a blue ring. The old classifier let
+    the red artwork win and reported your own troop as an enemy.
+    """
+    grid = ArenaGrid(720, 1280, _flat_calibration())
+    ppt = pixels_per_tile(grid)
+    det = BlobUnitDetector()
+    base = _warm(det, grid)
+
+    height = int(2.6 * ppt)
+    scene = _paste(base, _sprite("mega_knight"), 300, 130, height, tint="enemy")
+    # the blue team decal under the unit's feet
+    sprite_w = int(_sprite("mega_knight").shape[1] * height / _sprite("mega_knight").shape[0])
+    cx, cy = 300 + sprite_w // 2, 130 + height - 6
+    cv2.ellipse(scene, (cx, cy), (int(sprite_w * 0.62), int(sprite_w * 0.24)),
+                0, 0, 360, (200, 60, 20), -1)
+
+    units = det.detect(scene, grid)
+    assert units, "the unit must still be detected"
+    biggest = max(units, key=lambda u: u.area_px)
+    assert biggest.side is Side.ALLY, f"ally troop reported as {biggest.side}: {biggest.team_evidence}"
+
+
+def test_a_damaged_unit_is_not_split_in_two_by_its_health_bar() -> None:
+    """A partly depleted bar is a bar, not a smaller bar plus something below it.
+
+    HP loss used to break the bar into a bright filled part and a dark empty part; the second
+    half was sometimes read as a second unit standing under the first.
+    """
+    grid = ArenaGrid(720, 1280, _flat_calibration())
+    ppt = pixels_per_tile(grid)
+    det = BlobUnitDetector()
+    base = _warm(det, grid)
+
+    height = int(2.4 * ppt)
+    scene = _paste(base, _sprite("musketeer"), 300, 150, height, tint="enemy")
+    sprite_w = int(_sprite("musketeer").shape[1] * height / _sprite("musketeer").shape[0])
+    cx = 300 + sprite_w // 2
+    top = 150 - max(3, int(0.10 * ppt)) - 3
+    total = max(12, int(0.55 * ppt))
+    bar_h = max(3, int(0.10 * ppt))
+    # 40% of the bar is filled (red), the rest is the dark trough
+    cv2.rectangle(scene, (cx - total, top), (cx + total, top + bar_h), (38, 38, 40), -1)
+    cv2.rectangle(scene, (cx - total, top), (cx - total + int(0.4 * 2 * total), top + bar_h),
+                  (40, 40, 235), -1)
+
+    units = det.detect(scene, grid)
+    assert len(units) == 1, f"a damaged bar produced {len(units)} detections: {units}"
+    assert units[0].hp_ratio < 0.9, "the reader should notice the bar is depleted"
+
+
+# ======================================================================================
+# what the bot is allowed to learn from
+#
+# ``ArenaUnitBackend._remember`` feeds detections back into the identity library. That makes a
+# single misread permanent: a Wizard read as a Musketeer becomes a Musketeer *sample*, and the
+# matcher then agrees with its own mistake on every later frame. The label is only verifiable
+# when the bot produced it - i.e. for its own units - so learning is restricted to those.
+# ======================================================================================
+
+def _raw(name, side, confidence=0.9, hp_ratio=1.0, source="segmentation"):
+    from cr_bot.vision.arena_detector import RawDetection
+    from cr_bot.models import MoveType
+
+    return RawDetection(
+        name=name, side=side, tile_x=9.0, tile_y=20.0, pixel_bbox=(200, 300, 260, 360),
+        confidence=confidence, hp_ratio=hp_ratio, move_type=MoveType.GROUND,
+        weight_class=WeightClass.MEDIUM, source=source,
+    )
+
+
+def test_identity_memory_never_learns_from_enemy_detections(tmp_path) -> None:
+    from cr_bot.vision.arena_detector import ArenaUnitBackend
+
+    memory = UnitIdentityMemory(directory=tmp_path, namespace="t")
+    backend = ArenaUnitBackend(identity_memory=memory)
+    frame = _arena_background()
+    enemy = _raw("musketeer", Side.ENEMY)
+
+    backend._remember([enemy], frame, ArenaGrid(720, 1280, _flat_calibration()))
+
+    assert memory.sample_count == 0, (
+        "an enemy detection must never become a reference sample: its label is a guess")
+    assert backend.learned_samples == 0
+
+
+def test_identity_memory_learns_from_a_clean_allied_detection(tmp_path) -> None:
+    from cr_bot.vision.arena_detector import ArenaUnitBackend
+
+    memory = UnitIdentityMemory(directory=tmp_path, namespace="t")
+    backend = ArenaUnitBackend(identity_memory=memory)
+    frame = _arena_background()
+    ally = _raw("mega_knight", Side.ALLY)
+
+    backend._remember([ally], frame, ArenaGrid(720, 1280, _flat_calibration()))
+
+    assert memory.sample_count >= 1
+    assert "mega_knight" in memory.known_cards
+    assert backend.learned_samples >= 1
+
+
+def test_identity_memory_ignores_damaged_uncertain_and_unnamed_units(tmp_path) -> None:
+    """A damaged sprite carries a health bar and a damage flash; a weak guess carries nothing."""
+    from cr_bot.vision.arena_detector import ArenaUnitBackend
+
+    grid = ArenaGrid(720, 1280, _flat_calibration())
+    frame = _arena_background()
+    cases = {
+        "damaged": _raw("mega_knight", Side.ALLY, hp_ratio=0.4),
+        "low confidence": _raw("mega_knight", Side.ALLY, confidence=0.45),
+        "unnamed": _raw("unknown_medium", Side.ALLY),
+        "bar fallback": _raw("mega_knight", Side.ALLY, source="bars"),
+    }
+    for label, det in cases.items():
+        memory = UnitIdentityMemory(directory=tmp_path / label.replace(" ", "_"), namespace="t")
+        backend = ArenaUnitBackend(identity_memory=memory)
+        backend._remember([det], frame, grid)
+        assert memory.sample_count == 0, f"{label} detection must not be learned from"

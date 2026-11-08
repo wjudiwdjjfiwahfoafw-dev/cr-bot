@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SPRITES_DIR = Path("assets/unit_sprites")
 
+#: how many frames per card are kept in memory by default
+DEFAULT_MAX_TEMPLATES = 6
+
 #: scale multipliers searched around the expected sprite size
 SCALE_STEPS = (0.82, 1.0, 1.22)
 
@@ -79,6 +82,8 @@ class SpriteTemplate:
     mask: np.ndarray  # float32 0/1, 1 where the sprite is opaque
     index: int
     source: str = ""
+    #: file stem inside the card folder ("f03"), used to look up the measured faction
+    stem: str = ""
 
     @property
     def aspect(self) -> float:
@@ -181,13 +186,28 @@ class SpriteLibrary:
         self,
         sprites_dir: Path | str = DEFAULT_SPRITES_DIR,
         cards: Optional[Iterable[str]] = None,
-        max_templates: int = 6,
+        max_templates: int = DEFAULT_MAX_TEMPLATES,
+        factions: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> None:
         self.sprites_dir = Path(sprites_dir)
         self.max_templates = max_templates
         self._wanted = set(cards) if cards else None
         self._templates: Dict[str, List[SpriteTemplate]] = {}
+        # ``{card: {frame_stem: "enemy"|"ally"|"neutral"}}`` measured by
+        # ``cr_bot.vision.sprite_factions``; empty when the library has not been audited, in
+        # which case every frame is used exactly as before.
+        self.factions: Dict[str, Dict[str, str]] = (
+            factions if factions is not None else self._load_factions()
+        )
         self.load()
+
+    def _load_factions(self) -> Dict[str, Dict[str, str]]:
+        try:
+            from cr_bot.vision.sprite_factions import load_faction_map
+
+            return load_faction_map(self.sprites_dir)
+        except Exception:      # a missing/broken map is not an error: frames are used as-is
+            return {}
 
     def load(self) -> int:
         self._templates.clear()
@@ -197,10 +217,12 @@ class SpriteLibrary:
             return 0
         for card_dir in sorted(p for p in self.sprites_dir.iterdir() if p.is_dir()):
             card = card_dir.name
+            if card.startswith("_"):
+                continue
             if self._wanted is not None and card not in self._wanted:
                 continue
             frames: List[SpriteTemplate] = []
-            for path in sorted(card_dir.glob("*.png"))[: self.max_templates]:
+            for path in self._frame_paths(card, sorted(card_dir.glob("*.png")))[: self.max_templates]:
                 img = decode_rgba(path)
                 if img is None:
                     continue
@@ -209,7 +231,7 @@ class SpriteLibrary:
                     continue
                 frames.append(
                     SpriteTemplate(card=card, gray=prepare_gray(img[:, :, :3]), mask=mask,
-                                   index=len(frames), source=str(path))
+                                   index=len(frames), source=str(path), stem=path.stem)
                 )
             if frames:
                 self._templates[card] = frames
@@ -218,6 +240,47 @@ class SpriteLibrary:
             logger.info("sprite library: %d cards / %d frames from %s",
                         len(self._templates), total, self.sprites_dir)
         return total
+
+    def _frame_paths(self, card: str, paths: List[Path]) -> List[Path]:
+        """Order a card's frames so the kept subset spans both team tints.
+
+        Frames are chosen round-robin across the measured factions (neutral first, since a
+        neutral render suits both teams) instead of taking the first N files.  Without the
+        faction map — the common case, and the behaviour this module shipped with — the files
+        are used in name order, so nothing changes for libraries that have not been audited.
+        """
+        measured = self.factions.get(card) or {}
+        if not measured:
+            return paths
+        buckets: Dict[str, List[Path]] = {"neutral": [], "ally": [], "enemy": []}
+        for path in paths:
+            buckets.setdefault(measured.get(path.stem, "neutral"), []).append(path)
+        ordered: List[Path] = []
+        queues = [q for q in (buckets.get("neutral"), buckets.get("ally"), buckets.get("enemy")) if q]
+        while any(queues):
+            for queue in list(queues):
+                if queue:
+                    ordered.append(queue.pop(0))
+            queues = [q for q in queues if q]
+        return ordered
+
+    def frames_by_faction(self, card: str, faction: str) -> List[SpriteTemplate]:
+        """The loaded frames of one card that depict ``faction`` (empty if it has none)."""
+        measured = self.factions.get(card) or {}
+        if not measured:
+            return self.frames_for(card)
+        return [f for f in self.frames_for(card) if measured.get(f.stem, "neutral") == faction]
+
+    def faction_coverage(self) -> Dict[str, float]:
+        """Per card: how many of its loaded frames belong to each faction (for logs/HUD)."""
+        out: Dict[str, float] = {}
+        for card, frames in self._templates.items():
+            measured = self.factions.get(card) or {}
+            if not measured or not frames:
+                continue
+            ally = sum(1 for f in frames if measured.get(f.stem) == "ally")
+            out[card] = ally / float(len(frames))
+        return out
 
     @property
     def cards(self) -> List[str]:

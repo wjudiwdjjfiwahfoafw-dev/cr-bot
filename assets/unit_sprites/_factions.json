@@ -1,0 +1,3124 @@
+{
+ "cards": {
+  "archers": {
+   "frames": {
+    "f00": {
+     "blue_px": 99,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1605,
+     "score": -2.776
+    },
+    "f01": {
+     "blue_px": 491,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 505,
+     "score": -0.028
+    },
+    "f02": {
+     "blue_px": 1182,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 208,
+     "score": 1.733
+    },
+    "f03": {
+     "blue_px": 85,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 960,
+     "score": -2.414
+    },
+    "f04": {
+     "blue_px": 295,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 370,
+     "score": -0.226
+    },
+    "f05": {
+     "blue_px": 478,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 293,
+     "score": 0.488
+    },
+    "f06": {
+     "blue_px": 601,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 266,
+     "score": 0.813
+    },
+    "f07": {
+     "blue_px": 685,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 460,
+     "score": 0.397
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "baby_dragon": {
+   "frames": {
+    "f00": {
+     "blue_px": 818,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 12,
+     "score": 4.143
+    },
+    "f01": {
+     "blue_px": 9,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 21,
+     "score": -0.788
+    },
+    "f02": {
+     "blue_px": 59,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 6,
+     "score": 2.148
+    },
+    "f03": {
+     "blue_px": 301,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 98,
+     "score": 1.115
+    },
+    "f04": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 610,
+     "score": -6.415
+    },
+    "f05": {
+     "blue_px": 465,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 9,
+     "score": 3.842
+    },
+    "f06": {
+     "blue_px": 688,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 124,
+     "score": 1.707
+    },
+    "f07": {
+     "blue_px": 1,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 6,
+     "score": -1.253
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "balloon": {
+   "frames": {
+    "f00": {
+     "blue_px": 108,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 11,
+     "score": 2.206
+    },
+    "f01": {
+     "blue_px": 94,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 7,
+     "score": 2.474
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "bandit": {
+   "frames": {
+    "f00": {
+     "blue_px": 387,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 186,
+     "score": 0.73
+    },
+    "f01": {
+     "blue_px": 316,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 120,
+     "score": 0.963
+    },
+    "f02": {
+     "blue_px": 274,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 107,
+     "score": 0.935
+    },
+    "f03": {
+     "blue_px": 312,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 128,
+     "score": 0.886
+    },
+    "f04": {
+     "blue_px": 296,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 91,
+     "score": 1.172
+    },
+    "f05": {
+     "blue_px": 199,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 82,
+     "score": 0.879
+    },
+    "f06": {
+     "blue_px": 234,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 88,
+     "score": 0.971
+    },
+    "f07": {
+     "blue_px": 396,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 181,
+     "score": 0.78
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "barbarian_barrel": {
+   "frames": {
+    "f00": {
+     "blue_px": 48,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 778,
+     "score": -2.766
+    },
+    "f01": {
+     "blue_px": 9,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 630,
+     "score": -4.145
+    },
+    "f02": {
+     "blue_px": 877,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 359,
+     "score": 0.892
+    },
+    "f03": {
+     "blue_px": 950,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 338,
+     "score": 1.032
+    },
+    "f04": {
+     "blue_px": 29,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1018,
+     "score": -3.525
+    },
+    "f05": {
+     "blue_px": 38,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 581,
+     "score": -2.703
+    },
+    "f06": {
+     "blue_px": 697,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 192,
+     "score": 1.286
+    },
+    "f07": {
+     "blue_px": 608,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 281,
+     "score": 0.77
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "barbarians": {
+   "frames": {
+    "f00": {
+     "blue_px": 48,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 778,
+     "score": -2.766
+    },
+    "f01": {
+     "blue_px": 9,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 630,
+     "score": -4.145
+    },
+    "f02": {
+     "blue_px": 877,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 359,
+     "score": 0.892
+    },
+    "f03": {
+     "blue_px": 950,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 338,
+     "score": 1.032
+    },
+    "f04": {
+     "blue_px": 29,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1018,
+     "score": -3.525
+    },
+    "f05": {
+     "blue_px": 38,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 581,
+     "score": -2.703
+    },
+    "f06": {
+     "blue_px": 697,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 192,
+     "score": 1.286
+    },
+    "f07": {
+     "blue_px": 608,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 281,
+     "score": 0.77
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "bats": {
+   "frames": {
+    "f00": {
+     "blue_px": 616,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 65,
+     "score": 2.235
+    },
+    "f01": {
+     "blue_px": 610,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 76,
+     "score": 2.071
+    },
+    "f02": {
+     "blue_px": 703,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 78,
+     "score": 2.187
+    },
+    "f03": {
+     "blue_px": 632,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 25,
+     "score": 3.192
+    },
+    "f04": {
+     "blue_px": 821,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 33,
+     "score": 3.185
+    },
+    "f05": {
+     "blue_px": 735,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 311,
+     "score": 0.858
+    },
+    "f06": {
+     "blue_px": 765,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 1,
+     "score": 5.948
+    },
+    "f07": {
+     "blue_px": 730,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 4,
+     "score": 4.985
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "battle_ram": {
+   "frames": {
+    "f00": {
+     "blue_px": 267,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1154,
+     "score": -1.461
+    },
+    "f01": {
+     "blue_px": 241,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 4,
+     "score": 3.879
+    },
+    "f02": {
+     "blue_px": 161,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 3.989
+    },
+    "f03": {
+     "blue_px": 84,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 3.344
+    },
+    "f04": {
+     "blue_px": 187,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 828,
+     "score": -1.484
+    },
+    "f05": {
+     "blue_px": 217,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1012,
+     "score": -1.536
+    },
+    "f06": {
+     "blue_px": 239,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 763,
+     "score": -1.158
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "bomb_tower": {
+   "frames": {
+    "f00": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1010,
+     "score": -6.919
+    },
+    "f01": {
+     "blue_px": 1033,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 1,
+     "score": 6.248
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "bomber": {
+   "frames": {
+    "f00": {
+     "blue_px": 38,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 694,
+     "score": -2.88
+    },
+    "f01": {
+     "blue_px": 822,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 104,
+     "score": 2.059
+    },
+    "f02": {
+     "blue_px": 49,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1011,
+     "score": -3.008
+    },
+    "f03": {
+     "blue_px": 902,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 119,
+     "score": 2.018
+    },
+    "f04": {
+     "blue_px": 124,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 904,
+     "score": -1.98
+    },
+    "f05": {
+     "blue_px": 1066,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 151,
+     "score": 1.949
+    },
+    "f06": {
+     "blue_px": 649,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 162,
+     "score": 1.383
+    },
+    "f07": {
+     "blue_px": 121,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 635,
+     "score": -1.651
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "bowler": {
+   "frames": {
+    "f00": {
+     "blue_px": 2597,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 236,
+     "score": 2.394
+    },
+    "f01": {
+     "blue_px": 3077,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 173,
+     "score": 2.873
+    },
+    "f02": {
+     "blue_px": 2973,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 157,
+     "score": 2.935
+    },
+    "f03": {
+     "blue_px": 3135,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 248,
+     "score": 2.533
+    },
+    "f04": {
+     "blue_px": 4021,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 122,
+     "score": 3.487
+    },
+    "f05": {
+     "blue_px": 2599,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 40,
+     "score": 4.15
+    },
+    "f06": {
+     "blue_px": 3779,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 48,
+     "score": 4.346
+    },
+    "f07": {
+     "blue_px": 2974,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 8,
+     "score": 5.801
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "cannon": {
+   "frames": {
+    "f00": {
+     "blue_px": 111,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 542,
+     "score": -1.579
+    },
+    "f01": {
+     "blue_px": 195,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 521,
+     "score": -0.98
+    },
+    "f02": {
+     "blue_px": 125,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 530,
+     "score": -1.438
+    },
+    "f03": {
+     "blue_px": 632,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.45
+    },
+    "f04": {
+     "blue_px": 121,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 532,
+     "score": -1.475
+    },
+    "f05": {
+     "blue_px": 623,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.436
+    },
+    "f06": {
+     "blue_px": 69,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 494,
+     "score": -1.956
+    },
+    "f07": {
+     "blue_px": 130,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 515,
+     "score": -1.371
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "dark_prince": {
+   "frames": {
+    "f00": {
+     "blue_px": 1094,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 207,
+     "score": 1.661
+    },
+    "f01": {
+     "blue_px": 1245,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 165,
+     "score": 2.016
+    },
+    "f02": {
+     "blue_px": 508,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 195,
+     "score": 0.954
+    },
+    "f03": {
+     "blue_px": 962,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 181,
+     "score": 1.666
+    },
+    "f04": {
+     "blue_px": 354,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 500,
+     "score": -0.344
+    },
+    "f05": {
+     "blue_px": 574,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 588,
+     "score": -0.024
+    },
+    "f06": {
+     "blue_px": 37,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 519,
+     "score": -2.616
+    },
+    "f07": {
+     "blue_px": 63,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 529,
+     "score": -2.114
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "dart_goblin": {
+   "frames": {
+    "f00": {
+     "blue_px": 496,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 48,
+     "score": 2.317
+    },
+    "f01": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": true,
+     "red_px": 118,
+     "score": -4.779
+    },
+    "f02": {
+     "blue_px": 126,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 26,
+     "score": 1.548
+    },
+    "f03": {
+     "blue_px": 117,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 15,
+     "score": 1.998
+    },
+    "f04": {
+     "blue_px": 46,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 16,
+     "score": 1.017
+    },
+    "f05": {
+     "blue_px": 90,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 4.511
+    },
+    "f06": {
+     "blue_px": 165,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 22,
+     "score": 1.976
+    },
+    "f07": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 461,
+     "score": -6.136
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "electro_wizard": {
+   "frames": {
+    "f00": {
+     "blue_px": 825,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 343,
+     "score": 0.876
+    },
+    "f01": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": true,
+     "red_px": 843,
+     "score": -6.738
+    },
+    "f02": {
+     "blue_px": 1187,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 25,
+     "score": 3.822
+    },
+    "f03": {
+     "blue_px": 611,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 87,
+     "score": 1.939
+    },
+    "f04": {
+     "blue_px": 708,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 99,
+     "score": 1.959
+    },
+    "f05": {
+     "blue_px": 897,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 23,
+     "score": 3.622
+    },
+    "f06": {
+     "blue_px": 476,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 200,
+     "score": 0.864
+    },
+    "f07": {
+     "blue_px": 401,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 126,
+     "score": 1.152
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "executioner": {
+   "frames": {
+    "f00": {
+     "blue_px": 1751,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 810,
+     "score": 0.77
+    },
+    "f01": {
+     "blue_px": 1296,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 446,
+     "score": 1.065
+    },
+    "f02": {
+     "blue_px": 1763,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 696,
+     "score": 0.929
+    },
+    "f03": {
+     "blue_px": 1721,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 461,
+     "score": 1.316
+    },
+    "f04": {
+     "blue_px": 842,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 284,
+     "score": 1.084
+    },
+    "f05": {
+     "blue_px": 819,
+     "faction": "ally",
+     "fragment": true,
+     "red_px": 133,
+     "score": 1.811
+    },
+    "f06": {
+     "blue_px": 1242,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 203,
+     "score": 1.807
+    },
+    "f07": {
+     "blue_px": 1080,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 421,
+     "score": 0.941
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "fire_spirit": {
+   "frames": {
+    "f00": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 65,
+     "score": -4.19
+    },
+    "f01": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 47,
+     "score": -3.871
+    },
+    "f02": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 23,
+     "score": -3.178
+    },
+    "f03": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 26,
+     "score": -3.296
+    },
+    "f04": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 13,
+     "score": -2.639
+    },
+    "f05": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 13,
+     "score": -2.639
+    },
+    "f06": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 51,
+     "score": -3.951
+    },
+    "f07": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 20,
+     "score": -3.045
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "firecracker": {
+   "frames": {
+    "f00": {
+     "blue_px": 208,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 32,
+     "score": 1.846
+    },
+    "f01": {
+     "blue_px": 531,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 85,
+     "score": 1.822
+    },
+    "f02": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 377,
+     "score": -5.935
+    },
+    "f03": {
+     "blue_px": 443,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 109,
+     "score": 1.395
+    },
+    "f04": {
+     "blue_px": 251,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 64,
+     "score": 1.355
+    },
+    "f05": {
+     "blue_px": 495,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 104,
+     "score": 1.553
+    },
+    "f06": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 323,
+     "score": -5.781
+    },
+    "f07": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 581,
+     "score": -6.366
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "giant": {
+   "frames": {
+    "f00": {
+     "blue_px": 147,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1307,
+     "score": -2.179
+    },
+    "f01": {
+     "blue_px": 250,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2160,
+     "score": -2.153
+    },
+    "f02": {
+     "blue_px": 284,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2231,
+     "score": -2.058
+    },
+    "f03": {
+     "blue_px": 131,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1347,
+     "score": -2.324
+    },
+    "f04": {
+     "blue_px": 34,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2972,
+     "score": -4.442
+    },
+    "f05": {
+     "blue_px": 37,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2795,
+     "score": -4.298
+    },
+    "f06": {
+     "blue_px": 15,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2003,
+     "score": -4.83
+    },
+    "f07": {
+     "blue_px": 131,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1702,
+     "score": -2.557
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "giant_skeleton": {
+   "frames": {
+    "f00": {
+     "blue_px": 55,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 392,
+     "score": -1.948
+    },
+    "f01": {
+     "blue_px": 778,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 4,
+     "score": 5.049
+    },
+    "f02": {
+     "blue_px": 48,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 492,
+     "score": -2.309
+    },
+    "f03": {
+     "blue_px": 69,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 549,
+     "score": -2.061
+    },
+    "f04": {
+     "blue_px": 71,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 848,
+     "score": -2.467
+    },
+    "f05": {
+     "blue_px": 677,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 4,
+     "score": 4.91
+    },
+    "f06": {
+     "blue_px": 479,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.174
+    },
+    "f07": {
+     "blue_px": 65,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 288,
+     "score": -1.477
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "goblin_gang": {
+   "frames": {
+    "f00": {
+     "blue_px": 451,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 10,
+     "score": 3.716
+    },
+    "f01": {
+     "blue_px": 6,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 256,
+     "score": -3.603
+    },
+    "f02": {
+     "blue_px": 6,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 236,
+     "score": -3.522
+    },
+    "f03": {
+     "blue_px": 70,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 456,
+     "score": -1.862
+    },
+    "f04": {
+     "blue_px": 54,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 397,
+     "score": -1.979
+    },
+    "f05": {
+     "blue_px": 296,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 30,
+     "score": 2.26
+    },
+    "f06": {
+     "blue_px": 296,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 10,
+     "score": 3.296
+    },
+    "f07": {
+     "blue_px": 477,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 6,
+     "score": 4.224
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "goblin_hut": {
+   "frames": {
+    "f00": {
+     "blue_px": 533,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.28
+    },
+    "f01": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 527,
+     "score": -6.269
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "goblins": {
+   "frames": {
+    "f00": {
+     "blue_px": 70,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 456,
+     "score": -1.862
+    },
+    "f01": {
+     "blue_px": 384,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 6,
+     "score": 4.007
+    },
+    "f02": {
+     "blue_px": 411,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 23,
+     "score": 2.843
+    },
+    "f03": {
+     "blue_px": 6,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 256,
+     "score": -3.603
+    },
+    "f04": {
+     "blue_px": 282,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 13,
+     "score": 3.006
+    },
+    "f05": {
+     "blue_px": 66,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 510,
+     "score": -2.032
+    },
+    "f06": {
+     "blue_px": 461,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 16,
+     "score": 3.302
+    },
+    "f07": {
+     "blue_px": 6,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 236,
+     "score": -3.522
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "golem": {
+   "frames": {
+    "f00": {
+     "blue_px": 906,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.81
+    },
+    "f01": {
+     "blue_px": 629,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.446
+    },
+    "f02": {
+     "blue_px": 957,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 9,
+     "score": 4.562
+    },
+    "f03": {
+     "blue_px": 1035,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 10,
+     "score": 4.545
+    },
+    "f04": {
+     "blue_px": 82,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1195,
+     "score": -2.668
+    },
+    "f05": {
+     "blue_px": 1079,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 5.886
+    },
+    "f06": {
+     "blue_px": 857,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 5,
+     "score": 4.963
+    },
+    "f07": {
+     "blue_px": 1012,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 1,
+     "score": 6.228
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "guards": {
+   "frames": {
+    "f00": {
+     "blue_px": 426,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 24,
+     "score": 2.838
+    },
+    "f01": {
+     "blue_px": 104,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 151,
+     "score": -0.37
+    },
+    "f02": {
+     "blue_px": 695,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 206,
+     "score": 1.213
+    },
+    "f03": {
+     "blue_px": 751,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 1,
+     "score": 5.93
+    },
+    "f04": {
+     "blue_px": 50,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 141,
+     "score": -1.024
+    },
+    "f05": {
+     "blue_px": 617,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 5.328
+    },
+    "f06": {
+     "blue_px": 604,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 12,
+     "score": 3.84
+    },
+    "f07": {
+     "blue_px": 189,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 195,
+     "score": -0.031
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "hog_rider": {
+   "frames": {
+    "f00": {
+     "blue_px": 3,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2096,
+     "score": -6.262
+    },
+    "f01": {
+     "blue_px": 11,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1818,
+     "score": -5.021
+    },
+    "f02": {
+     "blue_px": 43,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2162,
+     "score": -3.895
+    },
+    "f03": {
+     "blue_px": 20,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1807,
+     "score": -4.455
+    },
+    "f04": {
+     "blue_px": 278,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1696,
+     "score": -1.805
+    },
+    "f05": {
+     "blue_px": 151,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1887,
+     "score": -2.519
+    },
+    "f06": {
+     "blue_px": 164,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1737,
+     "score": -2.355
+    },
+    "f07": {
+     "blue_px": 103,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1239,
+     "score": -2.478
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "ice_spirit": {
+   "frames": {
+    "f00": {
+     "blue_px": 628,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.444
+    },
+    "f01": {
+     "blue_px": 557,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.324
+    },
+    "f02": {
+     "blue_px": 521,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.258
+    },
+    "f03": {
+     "blue_px": 637,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.458
+    },
+    "f04": {
+     "blue_px": 569,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.346
+    },
+    "f05": {
+     "blue_px": 399,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 5.991
+    },
+    "f06": {
+     "blue_px": 671,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.51
+    },
+    "f07": {
+     "blue_px": 639,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.461
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "ice_wizard": {
+   "frames": {
+    "f00": {
+     "blue_px": 1018,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 543,
+     "score": 0.628
+    },
+    "f01": {
+     "blue_px": 1143,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 703,
+     "score": 0.486
+    },
+    "f02": {
+     "blue_px": 1247,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 464,
+     "score": 0.987
+    },
+    "f03": {
+     "blue_px": 455,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 938,
+     "score": -0.722
+    },
+    "f04": {
+     "blue_px": 366,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1512,
+     "score": -1.416
+    },
+    "f05": {
+     "blue_px": 329,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1365,
+     "score": -1.421
+    },
+    "f06": {
+     "blue_px": 827,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 439,
+     "score": 0.632
+    },
+    "f07": {
+     "blue_px": 761,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 511,
+     "score": 0.398
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "knight": {
+   "frames": {
+    "f00": {
+     "blue_px": 1166,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 287,
+     "score": 1.399
+    },
+    "f01": {
+     "blue_px": 817,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 78,
+     "score": 2.337
+    },
+    "f02": {
+     "blue_px": 664,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 871,
+     "score": -0.271
+    },
+    "f03": {
+     "blue_px": 357,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 795,
+     "score": -0.799
+    },
+    "f04": {
+     "blue_px": 195,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 512,
+     "score": -0.962
+    },
+    "f05": {
+     "blue_px": 207,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 526,
+     "score": -0.93
+    },
+    "f06": {
+     "blue_px": 770,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 276,
+     "score": 1.024
+    },
+    "f07": {
+     "blue_px": 484,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 136,
+     "score": 1.264
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "lava_hound": {
+   "frames": {
+    "f00": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 528,
+     "score": -6.271
+    },
+    "f01": {
+     "blue_px": 221,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 264,
+     "score": -0.177
+    },
+    "f02": {
+     "blue_px": 153,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 72,
+     "score": 0.746
+    },
+    "f03": {
+     "blue_px": 278,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 287,
+     "score": -0.032
+    },
+    "f04": {
+     "blue_px": 184,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 189,
+     "score": -0.027
+    },
+    "f05": {
+     "blue_px": 238,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 413,
+     "score": -0.549
+    },
+    "f06": {
+     "blue_px": 175,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 215,
+     "score": -0.205
+    },
+    "f07": {
+     "blue_px": 10,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 424,
+     "score": -3.654
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "lumberjack": {
+   "frames": {
+    "f00": {
+     "blue_px": 59,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 884,
+     "score": -2.691
+    },
+    "f01": {
+     "blue_px": 26,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1134,
+     "score": -3.739
+    },
+    "f02": {
+     "blue_px": 868,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 209,
+     "score": 1.42
+    },
+    "f03": {
+     "blue_px": 10,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 873,
+     "score": -4.375
+    },
+    "f04": {
+     "blue_px": 100,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 591,
+     "score": -1.768
+    },
+    "f05": {
+     "blue_px": 490,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 143,
+     "score": 1.227
+    },
+    "f06": {
+     "blue_px": 522,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 166,
+     "score": 1.142
+    },
+    "f07": {
+     "blue_px": 576,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 236,
+     "score": 0.89
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "mega_knight": {
+   "frames": {
+    "f00": {
+     "blue_px": 312,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 160,
+     "score": 0.665
+    },
+    "f01": {
+     "blue_px": 41,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 216,
+     "score": -1.642
+    },
+    "f02": {
+     "blue_px": 54,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 283,
+     "score": -1.642
+    },
+    "f03": {
+     "blue_px": 98,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 305,
+     "score": -1.128
+    },
+    "f04": {
+     "blue_px": 263,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 70,
+     "score": 1.313
+    },
+    "f05": {
+     "blue_px": 72,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 324,
+     "score": -1.493
+    },
+    "f06": {
+     "blue_px": 370,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 105,
+     "score": 1.253
+    },
+    "f07": {
+     "blue_px": 65,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 410,
+     "score": -1.829
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "mega_minion": {
+   "frames": {
+    "f00": {
+     "blue_px": 2881,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 376,
+     "score": 2.034
+    },
+    "f01": {
+     "blue_px": 2997,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 483,
+     "score": 1.824
+    },
+    "f02": {
+     "blue_px": 1660,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 262,
+     "score": 1.843
+    },
+    "f03": {
+     "blue_px": 1823,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 232,
+     "score": 2.058
+    },
+    "f04": {
+     "blue_px": 2240,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 299,
+     "score": 2.011
+    },
+    "f05": {
+     "blue_px": 2502,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 363,
+     "score": 1.928
+    },
+    "f06": {
+     "blue_px": 2729,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.912
+    },
+    "f07": {
+     "blue_px": 2238,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.714
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "miner": {
+   "frames": {
+    "f00": {
+     "blue_px": 350,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1490,
+     "score": -1.446
+    },
+    "f01": {
+     "blue_px": 391,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1314,
+     "score": -1.21
+    },
+    "f02": {
+     "blue_px": 184,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1038,
+     "score": -1.726
+    },
+    "f03": {
+     "blue_px": 285,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1195,
+     "score": -1.431
+    },
+    "f04": {
+     "blue_px": 468,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1190,
+     "score": -0.932
+    },
+    "f05": {
+     "blue_px": 159,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1210,
+     "score": -2.024
+    },
+    "f06": {
+     "blue_px": 279,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1131,
+     "score": -1.397
+    },
+    "f07": {
+     "blue_px": 246,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 786,
+     "score": -1.159
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "mini_pekka": {
+   "frames": {
+    "f00": {
+     "blue_px": 1381,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.231
+    },
+    "f01": {
+     "blue_px": 1399,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 214,
+     "score": 1.874
+    },
+    "f02": {
+     "blue_px": 1841,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 167,
+     "score": 2.395
+    },
+    "f03": {
+     "blue_px": 1838,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 142,
+     "score": 2.554
+    },
+    "f04": {
+     "blue_px": 1622,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 165,
+     "score": 2.28
+    },
+    "f05": {
+     "blue_px": 1980,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.591
+    },
+    "f06": {
+     "blue_px": 2661,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.887
+    },
+    "f07": {
+     "blue_px": 1921,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.561
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "minion_horde": {
+   "frames": {
+    "f00": {
+     "blue_px": 2419,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 327,
+     "score": 1.999
+    },
+    "f01": {
+     "blue_px": 2456,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 502,
+     "score": 1.586
+    },
+    "f02": {
+     "blue_px": 1745,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 525,
+     "score": 1.2
+    },
+    "f03": {
+     "blue_px": 1597,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 349,
+     "score": 1.519
+    },
+    "f04": {
+     "blue_px": 1434,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 298,
+     "score": 1.568
+    },
+    "f05": {
+     "blue_px": 2005,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 23,
+     "score": 4.426
+    },
+    "f06": {
+     "blue_px": 1790,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 21,
+     "score": 4.399
+    },
+    "f07": {
+     "blue_px": 1733,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 17,
+     "score": 4.568
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "minions": {
+   "frames": {
+    "f00": {
+     "blue_px": 2419,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 327,
+     "score": 1.999
+    },
+    "f01": {
+     "blue_px": 2456,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 502,
+     "score": 1.586
+    },
+    "f02": {
+     "blue_px": 1745,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 525,
+     "score": 1.2
+    },
+    "f03": {
+     "blue_px": 1597,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 349,
+     "score": 1.519
+    },
+    "f04": {
+     "blue_px": 1434,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 298,
+     "score": 1.568
+    },
+    "f05": {
+     "blue_px": 2005,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 23,
+     "score": 4.426
+    },
+    "f06": {
+     "blue_px": 1790,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 21,
+     "score": 4.399
+    },
+    "f07": {
+     "blue_px": 1733,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 17,
+     "score": 4.568
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "mortar": {
+   "frames": {
+    "f00": {
+     "blue_px": 1753,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 9,
+     "score": 5.167
+    },
+    "f01": {
+     "blue_px": 1831,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 5,
+     "score": 5.721
+    },
+    "f02": {
+     "blue_px": 1174,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 693,
+     "score": 0.527
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "musketeer": {
+   "frames": {
+    "f00": {
+     "blue_px": 613,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 207,
+     "score": 1.082
+    },
+    "f01": {
+     "blue_px": 614,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 276,
+     "score": 0.798
+    },
+    "f02": {
+     "blue_px": 758,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 399,
+     "score": 0.641
+    },
+    "f03": {
+     "blue_px": 868,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 405,
+     "score": 0.761
+    },
+    "f04": {
+     "blue_px": 626,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 249,
+     "score": 0.919
+    },
+    "f05": {
+     "blue_px": 633,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 151,
+     "score": 1.428
+    },
+    "f06": {
+     "blue_px": 617,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 283,
+     "score": 0.778
+    },
+    "f07": {
+     "blue_px": 608,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 361,
+     "score": 0.52
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "pekka": {
+   "frames": {
+    "f00": {
+     "blue_px": 1994,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.598
+    },
+    "f01": {
+     "blue_px": 1390,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.238
+    },
+    "f02": {
+     "blue_px": 3693,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 243,
+     "score": 2.717
+    },
+    "f03": {
+     "blue_px": 1579,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 196,
+     "score": 2.082
+    },
+    "f04": {
+     "blue_px": 2535,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 188,
+     "score": 2.597
+    },
+    "f05": {
+     "blue_px": 2122,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 160,
+     "score": 2.579
+    },
+    "f06": {
+     "blue_px": 1788,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.489
+    },
+    "f07": {
+     "blue_px": 1923,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 7.562
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "prince": {
+   "frames": {
+    "f00": {
+     "blue_px": 246,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 623,
+     "score": -0.927
+    },
+    "f01": {
+     "blue_px": 112,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 308,
+     "score": -1.006
+    },
+    "f02": {
+     "blue_px": 165,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 550,
+     "score": -1.2
+    },
+    "f03": {
+     "blue_px": 1066,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 239,
+     "score": 1.492
+    },
+    "f04": {
+     "blue_px": 431,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 129,
+     "score": 1.201
+    },
+    "f05": {
+     "blue_px": 117,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 481,
+     "score": -1.407
+    },
+    "f06": {
+     "blue_px": 970,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 198,
+     "score": 1.585
+    },
+    "f07": {
+     "blue_px": 613,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 78,
+     "score": 2.051
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "princess": {
+   "frames": {
+    "f00": {
+     "blue_px": 121,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1980,
+     "score": -2.787
+    },
+    "f01": {
+     "blue_px": 424,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1657,
+     "score": -1.361
+    },
+    "f02": {
+     "blue_px": 389,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1562,
+     "score": -1.388
+    },
+    "f03": {
+     "blue_px": 963,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 506,
+     "score": 0.643
+    },
+    "f04": {
+     "blue_px": 164,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1649,
+     "score": -2.303
+    },
+    "f05": {
+     "blue_px": 1511,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 809,
+     "score": 0.624
+    },
+    "f06": {
+     "blue_px": 828,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 1000,
+     "score": -0.189
+    },
+    "f07": {
+     "blue_px": 939,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 1032,
+     "score": -0.094
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "royal_giant": {
+   "frames": {
+    "f00": {
+     "blue_px": 701,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 622,
+     "score": 0.119
+    },
+    "f01": {
+     "blue_px": 172,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 471,
+     "score": -1.004
+    },
+    "f02": {
+     "blue_px": 719,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 116,
+     "score": 1.817
+    },
+    "f03": {
+     "blue_px": 673,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 227,
+     "score": 1.084
+    },
+    "f04": {
+     "blue_px": 425,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 181,
+     "score": 0.85
+    },
+    "f05": {
+     "blue_px": 432,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 522,
+     "score": -0.189
+    },
+    "f06": {
+     "blue_px": 799,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 492,
+     "score": 0.484
+    },
+    "f07": {
+     "blue_px": 564,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 192,
+     "score": 1.074
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "royal_hogs": {
+   "frames": {
+    "f00": {
+     "blue_px": 3,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2096,
+     "score": -6.262
+    },
+    "f01": {
+     "blue_px": 11,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1818,
+     "score": -5.021
+    },
+    "f02": {
+     "blue_px": 43,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2162,
+     "score": -3.895
+    },
+    "f03": {
+     "blue_px": 20,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1807,
+     "score": -4.455
+    },
+    "f04": {
+     "blue_px": 278,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1696,
+     "score": -1.805
+    },
+    "f05": {
+     "blue_px": 151,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1887,
+     "score": -2.519
+    },
+    "f06": {
+     "blue_px": 164,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1737,
+     "score": -2.355
+    },
+    "f07": {
+     "blue_px": 103,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1239,
+     "score": -2.478
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "skeleton_army": {
+   "frames": {
+    "f00": {
+     "blue_px": 92,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 1,
+     "score": 3.839
+    },
+    "f01": {
+     "blue_px": 38,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.664
+    },
+    "f02": {
+     "blue_px": 35,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.584
+    },
+    "f03": {
+     "blue_px": 34,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.555
+    },
+    "f04": {
+     "blue_px": 38,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.664
+    },
+    "f05": {
+     "blue_px": 66,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 4.205
+    },
+    "f06": {
+     "blue_px": 35,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.584
+    },
+    "f07": {
+     "blue_px": 124,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 4.828
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "skeletons": {
+   "frames": {
+    "f00": {
+     "blue_px": 92,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 1,
+     "score": 3.839
+    },
+    "f01": {
+     "blue_px": 38,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.664
+    },
+    "f02": {
+     "blue_px": 35,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.584
+    },
+    "f03": {
+     "blue_px": 34,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.555
+    },
+    "f04": {
+     "blue_px": 38,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.664
+    },
+    "f05": {
+     "blue_px": 66,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 4.205
+    },
+    "f06": {
+     "blue_px": 35,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 3.584
+    },
+    "f07": {
+     "blue_px": 124,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 4.828
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "sparky": {
+   "frames": {
+    "f00": {
+     "blue_px": 11,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1019,
+     "score": -4.443
+    },
+    "f01": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": true,
+     "red_px": 5,
+     "score": -1.792
+    },
+    "f02": {
+     "blue_px": 6,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1039,
+     "score": -5.001
+    },
+    "f03": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": true,
+     "red_px": 7,
+     "score": -2.079
+    },
+    "f04": {
+     "blue_px": 7,
+     "faction": "neutral",
+     "fragment": true,
+     "red_px": 1,
+     "score": 1.386
+    },
+    "f05": {
+     "blue_px": 5,
+     "faction": "neutral",
+     "fragment": true,
+     "red_px": 3,
+     "score": 0.405
+    },
+    "f06": {
+     "blue_px": 14,
+     "faction": "neutral",
+     "fragment": true,
+     "red_px": 6,
+     "score": 0.762
+    },
+    "f07": {
+     "blue_px": 9,
+     "faction": "neutral",
+     "fragment": true,
+     "red_px": 3,
+     "score": 0.916
+    }
+   },
+   "missing_faction": "ally",
+   "mixed": false
+  },
+  "tesla": {
+   "frames": {
+    "f00": {
+     "blue_px": 0,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 470,
+     "score": -6.155
+    },
+    "f01": {
+     "blue_px": 440,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 926,
+     "score": -0.743
+    },
+    "f02": {
+     "blue_px": 12,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 421,
+     "score": -3.48
+    },
+    "f03": {
+     "blue_px": 145,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 296,
+     "score": -0.71
+    },
+    "f04": {
+     "blue_px": 428,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 6.061
+    },
+    "f05": {
+     "blue_px": 420,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 4.944
+    },
+    "f06": {
+     "blue_px": 387,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 0,
+     "score": 5.961
+    },
+    "f07": {
+     "blue_px": 530,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 5.176
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "tombstone": {
+   "frames": {
+    "f00": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 2,
+     "score": -1.099
+    },
+    "f01": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 1,
+     "score": -0.693
+    },
+    "f02": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 0,
+     "score": 0.0
+    },
+    "f03": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 0,
+     "score": 0.0
+    },
+    "f04": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 1,
+     "score": -0.693
+    },
+    "f05": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 0,
+     "score": 0.0
+    },
+    "f06": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 0,
+     "score": 0.0
+    },
+    "f07": {
+     "blue_px": 0,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 0,
+     "score": 0.0
+    }
+   },
+   "missing_faction": null,
+   "mixed": false
+  },
+  "valkyrie": {
+   "frames": {
+    "f00": {
+     "blue_px": 29,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 581,
+     "score": -2.965
+    },
+    "f01": {
+     "blue_px": 617,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 126,
+     "score": 1.582
+    },
+    "f02": {
+     "blue_px": 848,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 254,
+     "score": 1.203
+    },
+    "f03": {
+     "blue_px": 762,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 118,
+     "score": 1.858
+    },
+    "f04": {
+     "blue_px": 736,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 179,
+     "score": 1.41
+    },
+    "f05": {
+     "blue_px": 30,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 770,
+     "score": -3.214
+    },
+    "f06": {
+     "blue_px": 139,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 719,
+     "score": -1.638
+    },
+    "f07": {
+     "blue_px": 59,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1017,
+     "score": -2.831
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "witch": {
+   "frames": {
+    "f00": {
+     "blue_px": 1334,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 7,
+     "score": 5.117
+    },
+    "f01": {
+     "blue_px": 1300,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 6,
+     "score": 5.225
+    },
+    "f02": {
+     "blue_px": 1291,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 2,
+     "score": 6.065
+    },
+    "f03": {
+     "blue_px": 1451,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 521,
+     "score": 1.023
+    },
+    "f04": {
+     "blue_px": 927,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 490,
+     "score": 0.637
+    },
+    "f05": {
+     "blue_px": 1606,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 194,
+     "score": 2.109
+    },
+    "f06": {
+     "blue_px": 1553,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 248,
+     "score": 1.831
+    },
+    "f07": {
+     "blue_px": 1766,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 183,
+     "score": 2.262
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  },
+  "wizard": {
+   "frames": {
+    "f00": {
+     "blue_px": 11,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 2802,
+     "score": -5.454
+    },
+    "f01": {
+     "blue_px": 1455,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 434,
+     "score": 1.208
+    },
+    "f02": {
+     "blue_px": 2018,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 444,
+     "score": 1.512
+    },
+    "f03": {
+     "blue_px": 66,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1877,
+     "score": -3.333
+    },
+    "f04": {
+     "blue_px": 23,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1851,
+     "score": -4.346
+    },
+    "f05": {
+     "blue_px": 11,
+     "faction": "enemy",
+     "fragment": false,
+     "red_px": 1768,
+     "score": -4.993
+    },
+    "f06": {
+     "blue_px": 1804,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 465,
+     "score": 1.354
+    },
+    "f07": {
+     "blue_px": 1871,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 283,
+     "score": 1.886
+    }
+   },
+   "missing_faction": null,
+   "mixed": true
+  },
+  "x_bow": {
+   "frames": {
+    "f00": {
+     "blue_px": 82,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 70,
+     "score": 0.156
+    },
+    "f01": {
+     "blue_px": 242,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 107,
+     "score": 0.811
+    },
+    "f02": {
+     "blue_px": 243,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 91,
+     "score": 0.975
+    },
+    "f03": {
+     "blue_px": 274,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 81,
+     "score": 1.21
+    },
+    "f04": {
+     "blue_px": 306,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 85,
+     "score": 1.273
+    },
+    "f05": {
+     "blue_px": 287,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 69,
+     "score": 1.414
+    },
+    "f06": {
+     "blue_px": 255,
+     "faction": "ally",
+     "fragment": false,
+     "red_px": 96,
+     "score": 0.97
+    },
+    "f07": {
+     "blue_px": 142,
+     "faction": "neutral",
+     "fragment": false,
+     "red_px": 72,
+     "score": 0.672
+    }
+   },
+   "missing_faction": "enemy",
+   "mixed": false
+  }
+ },
+ "description": "Faction of every reference sprite frame, measured from its own colours. score = log((blue_px+1)/(red_px+1)); positive is the ally (blue) render, negative the enemy (red) render, |score| < 0.70 is 'neutral'. Written by tools/sanitize_sprite_library.py; consumed by SpriteLibrary.",
+ "generated": "2026-11-08T13:40:30Z"
+}

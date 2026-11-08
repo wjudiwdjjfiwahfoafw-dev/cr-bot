@@ -27,13 +27,17 @@ What this module does instead
 * Deploys a card with a **drag gesture** — press on the card, glide to the target tile,
   hold briefly, release. This is the gesture the game is actually designed around, and it
   works regardless of whether tapping-to-select happens to register.
-* Injects through the **scrcpy control socket** when available: one persistent TCP
-  connection, sub-10 ms latency, real press durations and real multi-step motion — no
-  per-tap process spawn at all.
-* Falls back through ``input swipe`` (a single native drag, still cheap and reliable) and
-  ``input motionevent`` (true DOWN/MOVE/UP, Android 8+), and only then to the legacy taps.
-* Keeps an explicit record of what it did so the caller can verify the card really left
-  the hand and escalate/retry instead of silently desynchronising.
+* Injects through the **scrcpy control socket** when the capture backend has one
+  (:class:`~cr_bot.adb.scrcpy_multiclient.ControlChannel`): one persistent TCP connection
+  to the already-running server on the device, so a full press-move-release is a handful of
+  small writes with real timing. There is no per-touch process spawn and no ``input`` JVM,
+  which is what makes sub-10 ms deploys possible. The packet layout is version-aware (see
+  :mod:`cr_bot.adb.scrcpy_protocol`) because a 2.0+ server reads 31-byte touch payloads
+  while 1.x read 27.
+* Falls back through ``input swipe`` (one native drag, still cheap and reliable) and
+  ``input motionevent`` (true DOWN/MOVE/UP, Android 8+), then the legacy taps.
+* Keeps an explicit record of what it did so the caller can verify the card really left the
+  hand and escalate/retry instead of silently desynchronising.
 """
 
 from __future__ import annotations
@@ -43,9 +47,12 @@ import random
 import subprocess
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 from cr_bot.adb.adb_utils import Adb, ADBError
+
+if TYPE_CHECKING:  # pragma: no cover
+    from cr_bot.adb.scrcpy_multiclient import ControlChannel
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +120,44 @@ class TouchBackend:
     @property
     def available(self) -> bool:
         return True
+
+
+class ScrcpyBackend(TouchBackend):
+    """Inject over the scrcpy control socket — the fast path.
+
+    Coordinates are already in *frame* space, and the scrcpy server scales frame coordinates
+    to the physical display itself (the control channel is told the streamed size), so no
+    :class:`CoordMap` conversion happens here. That also means this backend keeps working if
+    the stream is downscaled to 720p on a 1440p phone.
+    """
+
+    name = "scrcpy"
+
+    def __init__(self, control: "ControlChannel", coord: Optional[CoordMap] = None) -> None:
+        # deliberately does not call super().__init__: there is no adb round trip to make
+        self.control = control
+        #: frame space only — the server scales to the physical display itself
+        self.coord = coord
+        self.last_latency_ms = 0.0
+
+    @property
+    def available(self) -> bool:
+        return self.control is not None
+
+    def tap(self, x: float, y: float, hold_ms: float = 70.0) -> None:
+        t0 = time.perf_counter()
+        self.control.tap(int(round(x)), int(round(y)), hold_ms=hold_ms)
+        self.last_latency_ms = (time.perf_counter() - t0) * 1000.0
+
+    def drag(self, start: Point, end: Point, duration_ms: float = 180.0, steps: int = 10) -> None:
+        t0 = time.perf_counter()
+        self.control.drag(
+            (int(round(start[0])), int(round(start[1]))),
+            (int(round(end[0])), int(round(end[1]))),
+            duration_ms=duration_ms,
+            steps=steps,
+        )
+        self.last_latency_ms = (time.perf_counter() - t0) * 1000.0
 
 
 class SwipeBackend(TouchBackend):
@@ -238,7 +283,7 @@ class GestureResult:
     note: str = ""
 
 
-DEFAULT_ORDER = ("swipe", "motionevent", "tap")
+DEFAULT_ORDER = ("scrcpy", "swipe", "motionevent", "tap")
 
 
 class TouchInjector:
@@ -284,12 +329,15 @@ class TouchInjector:
         name = name.lower()
         if name in ("adb", "auto", "default"):
             return "swipe"
+        if name in ("scrcpy_py", "native", "socket", "control"):
+            return "scrcpy"
         return name
 
     def _build_backends(self, control) -> Dict[str, TouchBackend]:
+        """Every backend that could work here, including the scrcpy socket when present."""
         built: Dict[str, TouchBackend] = {}
-        # There is no scrcpy control channel any more: every backend here goes through
-        # `adb shell input`, and each deploy is verified on the device afterwards.
+        if control is not None:
+            built["scrcpy"] = ScrcpyBackend(control, self.coord)
         built["swipe"] = SwipeBackend(self.adb, self.coord)
         built["motionevent"] = MotionEventBackend(self.adb, self.coord)
         built["tap"] = TapBackend(self.adb, self.coord)

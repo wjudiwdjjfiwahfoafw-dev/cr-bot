@@ -16,16 +16,39 @@ Key v2.0 Upgrades over v1.0:
 
 from __future__ import annotations
 
+import logging
 import math
 import random
+from dataclasses import replace
 from typing import List, Optional, Tuple
 
 from cr_bot.arena.grid import ArenaGrid
 from cr_bot.brain.pending_tracker import PendingDeployTracker
+from cr_bot.brain.spell_targeting import (
+    aim_is_wasted,
+    describe,
+    is_damage_spell,
+    plan_cast,
+    profile_for,
+)
 from cr_bot.brain.threat_analyzer import BoardAssessment, ThreatAnalyzer
 from cr_bot.config.cards_db import get_card_info
 from cr_bot.config.loader import BotConfig
-from cr_bot.models import BattleState, BotAction, GamePhase, HandSlot, Lane, MoveType, QueuedAction
+from cr_bot.models import (
+    BattleState,
+    BotAction,
+    GamePhase,
+    HandSlot,
+    Lane,
+    MoveType,
+    QueuedAction,
+    Side,
+)
+
+logger = logging.getLogger(__name__)
+
+#: used only to label a plan if a card somehow has no profile (never for a damage spell)
+_FALLBACK = profile_for("zap")
 
 
 class MKZapBaitBrain:
@@ -48,6 +71,8 @@ class MKZapBaitBrain:
         self._queued_combo: Optional[QueuedAction] = None
         self._last_action_ts: float = -999.0
         self._last_zap_reset_ts: float = -999.0
+        #: how many casts were dropped because they would have landed on nothing
+        self._dropped_wasted: int = 0
         self.last_top_candidates: List[BotAction] = []
 
     def reset(self) -> None:
@@ -55,6 +80,7 @@ class MKZapBaitBrain:
         self._queued_combo = None
         self._last_action_ts = -999.0
         self._last_zap_reset_ts = -999.0
+        self._dropped_wasted = 0
         self.last_top_candidates = []
 
     def decide(self, state: BattleState) -> Optional[BotAction]:
@@ -135,6 +161,36 @@ class MKZapBaitBrain:
         finalized: List[BotAction] = []
         for cand in candidates:
             tx, ty = self._clamp_for_card(cand.card_name, cand.tile_x, cand.tile_y, state)
+
+            # A damage spell is re-aimed against the live board right before it is played.
+            #
+            # This is not a veto, it is a *re-solve*: the board moves between the moment the
+            # generator ran and the moment the tap happens, and clamping can also shift the
+            # point. Re-planning asks the same question the generator did - where does this disc
+            # cover the most value - against what is actually there now. If nothing is worth
+            # hitting any more the cast is dropped; if the best point has moved, we use it.
+            if is_damage_spell(cand.card_name):
+                cover = plan_cast(
+                    cand.card_name,
+                    state.enemy_units,
+                    [a for a in state.ally_units],
+                    self._enemy_towers(state),
+                    lead_sec=self._spell_lead_sec(),
+                    bounds=self._cast_bounds(state, cand.card_name),
+                )
+                if cover is None:
+                    logger.debug("dropped %s: nothing in range worth the elixir",
+                                 cand.card_name)
+                    self._dropped_wasted += 1
+                    continue
+                tx, ty = self._clamp_for_card(cand.card_name, cover.tile_x, cover.tile_y, state)
+                wasted, why = aim_is_wasted(cand.card_name, tx, ty, state.enemy_units)
+                if wasted and cover.value <= 0.0:
+                    logger.debug("dropped %s: %s", cand.card_name, why)
+                    self._dropped_wasted += 1
+                    continue
+                cover_reason = describe(cover, profile_for(cand.card_name) or _FALLBACK)
+                cand = replace(cand, reason=f"{cand.reason} -> {cover_reason}")
             finalized.append(
                 BotAction(
                     card_name=cand.card_name,
@@ -149,6 +205,9 @@ class MKZapBaitBrain:
 
         finalized.sort(key=lambda a: a.score, reverse=True)
         self.last_top_candidates = finalized[:3]
+        if not finalized:
+            # every candidate was dropped by the last-mile spell check
+            return None
 
         best = finalized[0]
         if best.score < self.MIN_PLAY_SCORE:
@@ -1049,7 +1108,12 @@ class MKZapBaitBrain:
         )
         enemies = board.lanes[hot_lane].enemy_units
 
-        for card_pref in ("spear_goblins", "bats", "goblin_gang", "inferno_dragon", "miner", "mega_knight", "skeleton_barrel", "zap"):
+        # Note: no spells in this list. The anti-deadlock path exists so the bot never sits on a
+        # full elixir bar, and it deliberately does *not* reason about targets - which is exactly
+        # how Zap ended up being cast into an empty back corner. Spells now only ever come from
+        # the tactical generators, which aim at something and are checked in decide().
+        for card_pref in ("spear_goblins", "bats", "goblin_gang", "inferno_dragon", "miner",
+                          "mega_knight", "skeleton_barrel"):
             if card_pref not in slot_map:
                 continue
             slot = slot_map[card_pref]
@@ -1059,10 +1123,6 @@ class MKZapBaitBrain:
                     tx, ty = e0.tile_x, max(17.2, e0.tile_y - 1.2)
                 else:
                     tx, ty = self.grid.pick_safe_miner_spot(board.weaker_enemy_lane, rng=self._rng)
-            elif card_pref == "zap":
-                if not enemies:
-                    continue
-                tx, ty = enemies[0].tile_x, enemies[0].tile_y
             elif card_pref == "skeleton_barrel":
                 tx, ty = (
                     self.grid.LEFT_BRIDGE if board.weaker_enemy_lane == Lane.LEFT else self.grid.RIGHT_BRIDGE
@@ -1081,6 +1141,37 @@ class MKZapBaitBrain:
                 )
             )
             break
+
+    @staticmethod
+    def _enemy_towers(state: BattleState):
+        """Enemy towers that are still standing, in the solver's (name, side, x, y) form."""
+        return [
+            (tower.name, "enemy", tower.tile_x, tower.tile_y)
+            for tower in state.towers.values()
+            if tower.alive and tower.side is Side.ENEMY
+        ]
+
+    @staticmethod
+    def _spell_lead_sec() -> float:
+        """How far ahead to lead a moving unit: our own input/capture latency, nothing magic."""
+        from cr_bot.brain.spell_targeting import DEFAULT_LEAD_SEC
+
+        return DEFAULT_LEAD_SEC
+
+    @staticmethod
+    def _cast_bounds(state: BattleState, card_name: str):
+        """Where this spell may be aimed.
+
+        A spell that can be placed anywhere may be aimed anywhere on the board; a spell that must
+        go on our half (a defensive cast) is bounded by the same clamp the deploy uses. Keeping
+        this in one place is what stops the solver from "helpfully" aiming a defensive spell at a
+        tile we could never legally tap.
+        """
+        info = get_card_info(card_name)
+        if info.deploy_anywhere:
+            return (0.7, 1.2, 17.3, 31.0)
+        river_y = getattr(state, "river_tile_y", 16.0) or 16.0
+        return (0.7, float(river_y), 17.3, 31.0)
 
     def _clamp_for_card(
         self,

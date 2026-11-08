@@ -263,14 +263,26 @@ def test_stop_is_idempotent(fake_env) -> None:
 
 
 def test_auto_backend_ladder_order() -> None:
+    """The bundled native scrcpy stack is the best backend: 60fps video *and* a control socket.
+
+    It must come first, because that is the only path that injects input without spawning an
+    `input` JVM on the device. screenrecord (same video, no control) is the fallback, and
+    screencap proves the ADB link when nothing else works.
+    """
     client = MultiClient(backend="auto")
-    assert client._backend_chain() == ["screenrecord", "scrcpy_py", "screencap"]
+    chain = client._backend_chain()
+    assert chain[0] == "scrcpy"
+    assert chain[1] == "screenrecord"
+    assert chain[-1] == "screencap"
+    assert set(chain) <= set(MultiClient.BACKENDS)
 
 
 def test_explicit_backends_do_not_fall_through() -> None:
     assert MultiClient(backend="screenrecord")._backend_chain() == ["screenrecord"]
     assert MultiClient(backend="screencap")._backend_chain() == ["screencap"]
-    assert MultiClient(backend="scrcpy_py")._backend_chain() == ["scrcpy_py"]
+    assert MultiClient(backend="scrcpy")._backend_chain() == ["scrcpy"]
+    # py-scrcpy-client is not shipped with the bot, so it may hand over to the native one
+    assert MultiClient(backend="scrcpy_py")._backend_chain()[0] == "scrcpy_py"
 
 
 class _BoomSession:
@@ -309,16 +321,16 @@ def test_failing_scrcpy_degrades_to_screenrecord(monkeypatch) -> None:
     client = MultiClient(backend="auto")
 
     def fake_new_session(adb, backend):
-        if backend == "screenrecord":
+        if backend == "scrcpy":
             return _BoomSession()
-        if backend == "scrcpy_py":
+        if backend == "screenrecord":
             return _OkSession()
         raise AssertionError("should never reach screencap")
 
     monkeypatch.setattr(client, "_new_session", fake_new_session)
     session = client._start_one(FakeAdb("adb"))
     assert isinstance(session, _OkSession)
-    assert client.backend_used == "scrcpy_py"
+    assert client.backend_used == "screenrecord"
     assert "boom" in client.fallback_reason
 
 
@@ -340,7 +352,8 @@ def test_ladder_ends_at_screencap_when_everything_fails(monkeypatch, fake_env) -
 
     monkeypatch.setattr(client, "_new_session", fake_new_session)
     session = client._start_one(FakeAdb("adb"))
-    assert seen == ["screenrecord", "scrcpy_py", "screencap"]
+    assert seen[0] == "scrcpy" and seen[-1] == "screencap"
+    assert "screenrecord" in seen
     assert isinstance(session, ScreencapSession)
     assert client.backend_used == "screencap"
 

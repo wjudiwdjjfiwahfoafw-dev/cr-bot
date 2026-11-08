@@ -1,22 +1,34 @@
 """
-Scrcpy wire protocol (server v1.24) — packet builders, stream parsing and H.264 decoding.
+Scrcpy wire protocol — version-aware packet builders, stream parsing, H.264 decoding.
 
 This module is dependency-light on purpose: it talks the raw protocol so the bot does not
 depend on any particular (and frequently stale) third-party scrcpy wrapper.
 
-Protocol reference (scrcpy v1.24 ``server/src/main/java/com/genymobile/scrcpy``):
+Touch payload differs between server generations, and getting it wrong is silent: the
+server's control reader throws or mis-parses every later packet, so the screen mirrors
+perfectly and *nothing* can ever be tapped.
 
-* ``Position``/touch payload is **27 bytes**::
+``1.x`` (**27 bytes**), ``Controller.java`` of v1.24::
 
-      action(B) pointerId(q) x(i) y(i) screenW(H) screenH(H) pressure(H) buttons(i)
+    action(B) pointerId(q) x(i) y(i) screenW(H) screenH(H) pressure(H) buttons(i)
 
-  NOTE: several popular Python wrappers pack an extra 4-byte int here (31 bytes) which
-  desynchronises the server's control reader and makes every injected touch a no-op.
-  That is a very common cause of "screen grabs fine but cards never get placed".
+``2.0+`` (**31 bytes**), ``ControlMessageReader.parseInjectTouchEvent()`` of v5.0.1::
 
-* ``screenW``/``screenH`` must describe the coordinate space of the values you send
-  (i.e. the *video frame* size you are streaming). The server scales them to the physical
-  display via ``Device.getPhysicalPoint()``.
+    action(B) pointerId(q) x(i) y(i) screenW(H) screenH(H) pressure(H)
+    actionButton(i) buttons(i)
+
+Note the extra ``actionButton`` int, and that ``buttons`` moved to the end. Widely used
+Python wrappers hard-code one of the two layouts, which is why "scrcpy mirrors but never
+taps" is such a common bug report. :func:`build_touch` takes the server version and emits
+the right one, so the bundled v5.0.1 jar can drive input instead of only video.
+
+``screenW``/``screenH`` must describe the coordinate space of the values you send (i.e.
+the *video frame* size you are streaming). The server scales them to the physical display
+via ``getEventPointAndDisplayId()``, so a downscaled 720p stream can still be tapped in
+frame coordinates exactly as the vision pipeline measured them.
+
+A finger touch must leave ``actionButton`` and ``buttons`` at 0: the server treats any
+non-zero button as a *mouse*, and Clash Royale ignores a mouse drag on the card tray.
 """
 
 from __future__ import annotations
@@ -65,11 +77,13 @@ def build_options(
     video_codec: str = "h264",
     video_encoder: Optional[str] = None,
     display_id: int = 0,
+    scid: int = -1,
 ) -> Dict[str, str]:
-    """Server arguments for this jar version.
+    """Server arguments for this jar version, asking for a *raw* Annex-B stream.
 
-    Both families are asked to send a raw Annex-B stream (no frame headers, no stream metadata),
-    which is what the decoder wants, and both send the dummy byte + device name.
+    Both families are configured to send the device name (it is the window title and a useful
+    liveness check) followed by a header-less elementary stream, which is exactly what
+    :class:`H264FrameDecoder` wants.
 
     Legacy (1.x)::
 
@@ -77,8 +91,18 @@ def build_options(
         display_id show_touches stay_awake clipboard_autosync send_frame_meta send_device_meta
         send_dummy_byte
 
-    Modern (2.x+): ``bit_rate`` → ``video_bit_rate``, audio must be disabled explicitly, codec and
-    encoder are selectable, and ``send_stream_meta`` replaces the implicit codec header.
+    Modern (2.x+) — verified against ``Options.java`` of v5.0.1::
+
+        scid log_level video audio video_codec video_bit_rate max_size max_fps angle
+        tunnel_forward control display_id show_touches stay_awake clipboard_autosync
+        send_device_meta send_frame_meta send_dummy_byte send_stream_meta
+
+    Two traps on modern servers, both fatal and both silent:
+
+    * ``audio`` defaults to **true**, so it must be explicitly disabled or the server blocks
+      waiting for an audio socket that the bot never opens;
+    * ``send_stream_meta`` defaults to **true**, which prefixes the stream with a 4-byte codec
+      id and a 12-byte session header — feeding that to the H.264 parser yields no frames.
     """
     common = {
         "log_level": "info",
@@ -103,17 +127,21 @@ def build_options(
     options = dict(common)
     options.update(
         {
-            "scid": -1,                 # keep the classic "scrcpy" abstract socket name
+            # -1 keeps the classic `localabstract:scrcpy` name; anything else is hex on the
+            # wire because the server parses it with Integer.parseInt(value, 0x10)
+            "scid": -1 if scid < 0 else format(int(scid) & 0xFFFFFFFF, "x"),
             "video": "true",
-            "audio": "false",           # no audio socket: we only need the picture
+            "audio": "false",          # no audio socket: we only need the picture
             "video_codec": video_codec,
             "video_bit_rate": bitrate,
-            "send_stream_meta": "false",  # no 12-byte session header before the stream
+            "send_stream_meta": "false",  # no codec id / session header before the stream
+            "cleanup": "true",
         }
     )
     if video_encoder:
         options["video_encoder"] = video_encoder
     return options
+
 
 # Control message types (ControlMessage.java)
 TYPE_INJECT_KEYCODE = 0
@@ -135,14 +163,25 @@ ACTION_UP = 1
 ACTION_MOVE = 2
 ACTION_CANCEL = 3
 
-# The virtual pointer id scrcpy uses for a single synthetic finger.
+#: payload layout per server generation
+#:   1.x   action(B) pointerId(q) x(i) y(i) screenW(H) screenH(H) pressure(H) buttons(i)
+#:   2.0+  action(B) pointerId(q) x(i) y(i) screenW(H) screenH(H) pressure(H)
+#:         actionButton(i) buttons(i)
+_TOUCH_FMT_LEGACY = ">BqiiHHHi"
+_TOUCH_FMT_MODERN = ">BqiiHHHii"
+
+#: virtual finger id used by scrcpy for a synthetic touch
 POINTER_ID_FINGER = 0x1234567887654321
 POINTER_ID_SECOND = 0x2222222288888888
+#: scrcpy's *mouse* pointer id: only this one produces mouse semantics
+POINTER_ID_MOUSE = -1
 
 MAX_PRESSURE = 0xFFFF
 
-# INJECT_TOUCH_EVENT_PAYLOAD_LENGTH == 27 in scrcpy 1.24
-_TOUCH_FMT = ">BqiiHHHi"
+
+def touch_payload_length(version: Tuple[int, int, int] = (1, 24, 0)) -> int:
+    """Payload size (excluding the 1-byte type) the given server expects."""
+    return 31 if is_modern_version(version) else 27
 
 
 # --------------------------------------------------------------------------------------
@@ -203,15 +242,19 @@ def build_touch(
     pointer_id: int = POINTER_ID_FINGER,
     pressure: Optional[float] = None,
     buttons: int = 0,
+    action_button: int = 0,
+    version: Tuple[int, int, int] = (1, 24, 0),
 ) -> bytes:
-    """Serialize a TYPE_INJECT_TOUCH_EVENT packet (27-byte payload, 28 on the wire)."""
+    """Serialize a TYPE_INJECT_TOUCH_EVENT packet for the given server version.
+
+    ``version`` selects the payload layout: 27 bytes for 1.x, 31 bytes for 2.0+.
+    """
     if pressure is None:
         pressure = 0.0 if action == ACTION_UP else 1.0
     press_int = int(round(max(0.0, min(1.0, pressure)) * MAX_PRESSURE))
     x_i = int(max(0, min(int(screen_w) - 1, round(x))))
     y_i = int(max(0, min(int(screen_h) - 1, round(y))))
-    payload = struct.pack(
-        _TOUCH_FMT,
+    head = (
         int(action) & 0xFF,
         int(pointer_id),
         x_i,
@@ -219,14 +262,38 @@ def build_touch(
         int(screen_w) & 0xFFFF,
         int(screen_h) & 0xFFFF,
         press_int,
-        int(buttons),
     )
-    assert len(payload) == 27, len(payload)
+    if is_modern_version(version):
+        payload = struct.pack(_TOUCH_FMT_MODERN, *head, int(action_button), int(buttons))
+        expected = 31
+    else:
+        payload = struct.pack(_TOUCH_FMT_LEGACY, *head, int(buttons))
+        expected = 27
+    assert len(payload) == expected, (len(payload), expected)
     return struct.pack(">B", TYPE_INJECT_TOUCH_EVENT) + payload
 
 
-def build_keycode(keycode: int, action: int = ACTION_DOWN, repeat: int = 0, meta_state: int = 0) -> bytes:
-    return struct.pack(">BBiii", TYPE_INJECT_KEYCODE, int(action) & 0xFF, int(keycode), int(repeat), int(meta_state))
+def build_keycode(
+    keycode: int,
+    action: int = ACTION_DOWN,
+    repeat: int = 0,
+    meta_state: int = 0,
+    version: Tuple[int, int, int] = (1, 24, 0),
+) -> bytes:
+    """KEYCODE payload.
+
+    1.x  ``type(B) action(B) keycode(i) repeat(i) metaState(i)``
+    2.0+ ``type(B) action(B) keycode(i) repeat(i) metaState(i)`` — unchanged, but the
+    action byte of 2.0+ servers is a KeyEvent action (0/1) exactly as before.
+    """
+    return struct.pack(
+        ">BBiii",
+        TYPE_INJECT_KEYCODE,
+        int(action) & 0xFF,
+        int(keycode),
+        int(repeat),
+        int(meta_state),
+    )
 
 
 def build_back_or_screen_on(action: int = ACTION_DOWN) -> bytes:
@@ -234,8 +301,13 @@ def build_back_or_screen_on(action: int = ACTION_DOWN) -> bytes:
 
 
 def build_screen_power_mode(mode: int = 2) -> bytes:
-    """mode: 0 = off, 2 = normal."""
+    """Legacy (1.x) ``SET_SCREEN_POWER_MODE``: 0 = off, 2 = normal."""
     return struct.pack(">Bb", TYPE_SET_SCREEN_POWER_MODE, int(mode))
+
+
+def build_set_display_power(on: bool = True) -> bytes:
+    """Modern (2.0+) ``SET_DISPLAY_POWER``: a single boolean."""
+    return struct.pack(">B", TYPE_SET_SCREEN_POWER_MODE) + (b"\x01" if on else b"\x00")
 
 
 def build_rotate_device() -> bytes:

@@ -6,13 +6,14 @@ This replaces the original implementation, which had two problems that together 
 
 * **Capture** used ``adb exec-out screencap``. On a real phone that is a 150-400 ms round
   trip, so the bot was always acting on a stale frame. It now streams H.264 through
-  :class:`~cr_bot.adb.capture.MultiClient` (``screenrecord`` by default) and always reads the
-  newest frame.
+  :class:`~cr_bot.adb.capture.MultiClient` (the bundled scrcpy server by default, 60 fps) and
+  always reads the newest frame.
 * **Input** used two ``input tap`` calls with a nominal 60 ms gap. Each ``input`` invocation
   spawns a JVM on the device, and a zero-length tap is routinely dropped by the game. Cards
-  are now deployed with a real drag gesture with genuine press durations, using
-  ``input swipe`` first and ``input motionevent`` / ``input tap`` as fallbacks — and every
-  deploy is verified by re-reading the hand afterwards.
+  are now injected over the **scrcpy control socket** that the capture session already holds
+  (one persistent connection, real press durations, no process spawn), with ``input swipe`` /
+  ``input motionevent`` / ``input tap`` as fallbacks — and every deploy is verified by
+  re-reading the hand afterwards.
 
 Coordinates are handled in **frame space** and converted to device pixels exactly once, in
 :class:`~cr_bot.adb.touch.CoordMap`, so a downscaled capture stream can never shift taps.
@@ -50,10 +51,12 @@ class ADBController:
         input_backend: str = "auto",
         deploy_style: str = "drag",
         capture_bitrate: int = 12_000_000,
-        capture_max_fps: int = 30,
+        capture_max_fps: int = 60,
         keep_awake: bool = True,
         lock_portrait: bool = True,
         input_order: Sequence[str] = DEFAULT_ORDER,
+        scrcpy_jar: Optional[str] = None,
+        capture_connect_timeout: float = 12.0,
     ) -> None:
         self.adb_bin = adb_path
         self.serial = serial
@@ -69,6 +72,8 @@ class ADBController:
         self.keep_awake = bool(keep_awake)
         self.lock_portrait = bool(lock_portrait)
         self.input_order = tuple(input_order)
+        self.scrcpy_jar = scrcpy_jar
+        self.capture_connect_timeout = float(capture_connect_timeout)
 
         self.adb: Optional[Adb] = None
         self.client: Optional[MultiClient] = None
@@ -108,6 +113,8 @@ class ADBController:
             bitrate=self.capture_bitrate,
             max_fps=self.capture_max_fps,
             backend=self.capture_backend,
+            connect_timeout=self.capture_connect_timeout,
+            scrcpy_jar=self.scrcpy_jar,
         )
         self.client.start()
         session = self.client.session()
@@ -140,6 +147,12 @@ class ADBController:
             deploy_style=self.deploy_style,
             jitter_px=self.jitter_px,
         )
+        if getattr(session, "control", None) is None:
+            logger.warning(
+                "Capture backend %r has no control channel, so input uses `adb shell input` "
+                "(~100-250 ms per call instead of ~5 ms). `backend: scrcpy` is the fast path.",
+                self.backend_name,
+            )
         if self._input_backend_requested not in ("auto", "default", None):
             self.touch.set_active(self._input_backend_requested)
 
@@ -239,9 +252,15 @@ class ADBController:
         return self.touch.active if self.touch else "none"
 
     # -- diagnostics ---------------------------------------------------------------
+    @property
+    def has_control_socket(self) -> bool:
+        """True when input is injected over the scrcpy socket (the fast path)."""
+        return bool(self.client is not None and getattr(self.client, "has_control", False))
+
     def status_line(self) -> str:
         return (
             f"{self.serial} | capture={self.backend_name} {self.frame_size[0]}x{self.frame_size[1]} "
-            f"@{self.fps:.1f}fps (age {self.frame_age * 1000:.0f}ms) | input={self.input_backend} | "
+            f"@{self.fps:.1f}fps (age {self.frame_age * 1000:.0f}ms) | input={self.input_backend}"
+            f"{' [control socket]' if self.has_control_socket else ' [adb fallback]'} | "
             f"{self.touch.stats() if self.touch else 'no gestures'}"
         )
