@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clash-royale-mk-zap-bait-bot"
+version = "1.0.0"
+description = "Hybrid YOLOv8 + OpenCV Clash Royale Tactical Bot tailored for MK Miner Skeleton Barrel Zap Bait"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "PyYAML>=6.0",
+    "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+yolo = [
+    "ultralytics>=8.1.0",
+    "onnxruntime>=1.17.0",
+]
+dev = [
+    "pytest>=7.4.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["cr_bot*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

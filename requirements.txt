@@ -1,0 +1,12 @@
+# Core runtime (required)
+opencv-python>=4.8.0
+numpy>=1.24.0
+PyYAML>=6.0
+Pillow>=10.0.0
+
+# Hybrid ML detection (optional - bot automatically falls back to OpenCV if not installed or no weights provided)
+ultralytics>=8.1.0
+onnxruntime>=1.17.0
+
+# Development & testing
+pytest>=7.4.0

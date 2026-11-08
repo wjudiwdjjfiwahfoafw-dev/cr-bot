@@ -1,0 +1,502 @@
+"""Hybrid Arena Troop Detector: YOLOv8 / ONNX + OpenCV Health-Bar Fallback & Velocity Tracker."""
+
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import cv2
+import numpy as np
+
+from cr_bot.arena.grid import ArenaGrid
+from cr_bot.config.cards_db import get_card_info, normalize_card_name
+from cr_bot.models import DetectedUnit, MoveType, Side, WeightClass
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RawDetection:
+    name: str
+    side: Side
+    tile_x: float
+    tile_y: float
+    pixel_bbox: Tuple[int, int, int, int]
+    confidence: float
+    hp_ratio: float
+    move_type: MoveType
+    weight_class: WeightClass
+    source: str
+
+
+class YOLOBackend:
+    """Loads Ultralytics .pt or ONNX .onnx Clash Royale troop detector if weights are available."""
+
+    def __init__(self, weights_path: Optional[str], conf_threshold: float = 0.42) -> None:
+        self.conf_threshold = conf_threshold
+        self.mode: str = "disabled"
+        self._ultra_model = None
+        self._ort_session = None
+        self._cv_net = None
+        self._class_names: Dict[int, str] = {}
+
+        if not weights_path:
+            return
+        wpath = Path(weights_path)
+        if not wpath.is_file():
+            logger.info(
+                "YOLO weights '%s' not found; running with built-in OpenCV Health-Bar + Velocity detector.",
+                wpath,
+            )
+            return
+
+        suffix = wpath.suffix.lower()
+        if suffix == ".pt":
+            try:
+                from ultralytics import YOLO  # type: ignore
+
+                self._ultra_model = YOLO(str(wpath))
+                self._class_names = dict(self._ultra_model.names)
+                self.mode = "ultralytics"
+                logger.info("Loaded Ultralytics YOLOv8 model: %s (%d classes)", wpath, len(self._class_names))
+            except Exception as exc:
+                logger.warning("Failed to load .pt weights (%s); falling back to OpenCV.", exc)
+        elif suffix == ".onnx":
+            self._load_sidecar_names(wpath)
+            try:
+                import onnxruntime as ort  # type: ignore
+
+                self._ort_session = ort.InferenceSession(
+                    str(wpath), providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+                )
+                self.mode = "onnxruntime"
+                logger.info("Loaded ONNX Runtime model: %s", wpath)
+            except Exception:
+                try:
+                    self._cv_net = cv2.dnn.readNetFromONNX(str(wpath))
+                    self.mode = "opencv_dnn"
+                    logger.info("Loaded ONNX model via OpenCV DNN: %s", wpath)
+                except Exception as exc:
+                    logger.warning("Failed to load ONNX weights (%s); falling back to OpenCV.", exc)
+
+    def _load_sidecar_names(self, onnx_path: Path) -> None:
+        names_file = onnx_path.with_suffix(".names")
+        if names_file.is_file():
+            lines = [ln.strip() for ln in names_file.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            self._class_names = {i: ln for i, ln in enumerate(lines)}
+
+    @property
+    def is_active(self) -> bool:
+        return self.mode != "disabled"
+
+    def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        if self.mode == "ultralytics" and self._ultra_model is not None:
+            return self._detect_ultralytics(frame_bgr, grid)
+        if self.mode in ("onnxruntime", "opencv_dnn"):
+            return self._detect_onnx(frame_bgr, grid)
+        return []
+
+    def _detect_ultralytics(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        results = self._ultra_model.predict(frame_bgr, conf=self.conf_threshold, verbose=False)
+        out: List[RawDetection] = []
+        if not results:
+            return out
+        boxes = results[0].boxes
+        for i in range(len(boxes)):
+            xyxy = boxes.xyxy[i].cpu().numpy().astype(int)
+            conf = float(boxes.conf[i].cpu().item())
+            cls_id = int(boxes.cls[i].cpu().item())
+            raw_label = self._class_names.get(cls_id, f"class_{cls_id}")
+            det = self._label_to_detection(raw_label, tuple(xyxy), conf, frame_bgr, grid)
+            if det is not None:
+                out.append(det)
+        return out
+
+    def _detect_onnx(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        h, w = frame_bgr.shape[:2]
+        img_size = 640
+        blob = cv2.dnn.blobFromImage(frame_bgr, 1.0 / 255.0, (img_size, img_size), swapRB=True, crop=False)
+
+        if self.mode == "onnxruntime" and self._ort_session is not None:
+            inp_name = self._ort_session.get_inputs()[0].name
+            preds = self._ort_session.run(None, {inp_name: blob})[0]
+        elif self._cv_net is not None:
+            self._cv_net.setInput(blob)
+            preds = self._cv_net.forward()
+        else:
+            return []
+
+        # Standard YOLOv8 output shape: (1, 4 + num_classes, 8400) -> transpose to (8400, 4 + C)
+        arr = np.squeeze(preds)
+        if arr.ndim == 2 and arr.shape[0] < arr.shape[1]:
+            arr = arr.T
+
+        if arr.ndim != 2 or arr.shape[1] < 5:
+            return []
+
+        boxes_xywh = arr[:, :4]
+        scores_all = arr[:, 4:]
+        cls_ids = np.argmax(scores_all, axis=1)
+        confs = scores_all[np.arange(len(arr)), cls_ids]
+
+        keep = confs >= self.conf_threshold
+        boxes_xywh = boxes_xywh[keep]
+        cls_ids = cls_ids[keep]
+        confs = confs[keep]
+
+        if len(boxes_xywh) == 0:
+            return []
+
+        scale_x, scale_y = w / float(img_size), h / float(img_size)
+        nms_boxes: List[List[int]] = []
+        for cx, cy, bw, bh in boxes_xywh:
+            x1 = int((cx - 0.5 * bw) * scale_x)
+            y1 = int((cy - 0.5 * bh) * scale_y)
+            nms_boxes.append([x1, y1, int(bw * scale_x), int(bh * scale_y)])
+
+        indices = cv2.dnn.NMSBoxes(nms_boxes, confs.tolist(), self.conf_threshold, 0.45)
+        out: List[RawDetection] = []
+        for idx in np.array(indices).flatten():
+            bx, by, bw, bh = nms_boxes[int(idx)]
+            bbox = (max(0, bx), max(0, by), min(w, bx + bw), min(h, by + bh))
+            raw_label = self._class_names.get(int(cls_ids[int(idx)]), "unknown_medium")
+            det = self._label_to_detection(raw_label, bbox, float(confs[int(idx)]), frame_bgr, grid)
+            if det is not None:
+                out.append(det)
+        return out
+
+    def _label_to_detection(
+        self,
+        raw_label: str,
+        bbox: Tuple[int, int, int, int],
+        conf: float,
+        frame_bgr: np.ndarray,
+        grid: ArenaGrid,
+    ) -> Optional[RawDetection]:
+        lower = raw_label.lower()
+        side: Optional[Side] = None
+        cleaned = lower
+        for prefix, s_val in (
+            ("enemy_", Side.ENEMY),
+            ("opp_", Side.ENEMY),
+            ("red_", Side.ENEMY),
+            ("ally_", Side.ALLY),
+            ("friendly_", Side.ALLY),
+            ("blue_", Side.ALLY),
+        ):
+            if cleaned.startswith(prefix):
+                side = s_val
+                cleaned = cleaned[len(prefix) :]
+                break
+        if cleaned.endswith("_enemy") or cleaned.endswith("_1"):
+            side = Side.ENEMY
+            cleaned = cleaned.rsplit("_", 1)[0]
+        elif cleaned.endswith("_ally") or cleaned.endswith("_0"):
+            side = Side.ALLY
+            cleaned = cleaned.rsplit("_", 1)[0]
+
+        if side is None:
+            side = OpenCVHealthBarBackend.infer_side_around_bbox(frame_bgr, bbox)
+
+        card_slug = normalize_card_name(cleaned)
+        info = get_card_info(card_slug)
+        x1, y1, x2, y2 = bbox
+        foot_px = 0.5 * (x1 + x2)
+        foot_py = y2 - 0.15 * (y2 - y1)
+        tx, ty = grid.pixel_to_tile(foot_px, foot_py)
+
+        return RawDetection(
+            name=info.name,
+            side=side,
+            tile_x=tx,
+            tile_y=ty,
+            pixel_bbox=bbox,
+            confidence=conf,
+            hp_ratio=1.0,
+            move_type=info.move_type,
+            weight_class=info.weight_class,
+            source="yolo",
+        )
+
+
+class OpenCVHealthBarBackend:
+    """Zero-weight OpenCV detector that finds red/blue unit health bars and classifies unit weight."""
+
+    def detect(self, frame_bgr: np.ndarray, grid: ArenaGrid) -> List[RawDetection]:
+        ax1, ay1, ax2, ay2 = grid.arena_pixel_bounds
+        arena_roi = frame_bgr[ay1:ay2, ax1:ax2]
+        if arena_roi.size == 0:
+            return []
+
+        hsv = cv2.cvtColor(arena_roi, cv2.COLOR_BGR2HSV)
+
+        # Enemy red health bars
+        enemy_mask = cv2.inRange(hsv, np.array([0, 125, 120]), np.array([8, 255, 255])) | cv2.inRange(
+            hsv, np.array([170, 125, 120]), np.array([179, 255, 255])
+        )
+        # Ally blue/cyan health bars
+        ally_mask = cv2.inRange(hsv, np.array([94, 115, 125]), np.array([116, 255, 255]))
+
+        # Mask out the 6 fixed tower HP bar zones so static towers aren't reported as mobile units
+        for tw_name, (tx, ty) in grid.TOWER_TILES.items():
+            px, py = grid.tile_to_pixel(tx, ty)
+            lx, ly = px - ax1, py - ay1
+            cv2.rectangle(enemy_mask, (lx - 42, ly - 56), (lx + 42, ly + 28), 0, -1)
+            cv2.rectangle(ally_mask, (lx - 42, ly - 56), (lx + 42, ly + 28), 0, -1)
+
+        detections: List[RawDetection] = []
+        detections.extend(self._extract_bars(enemy_mask, Side.ENEMY, ax1, ay1, grid))
+        detections.extend(self._extract_bars(ally_mask, Side.ALLY, ax1, ay1, grid))
+        return detections
+
+    def _extract_bars(
+        self,
+        mask: np.ndarray,
+        side: Side,
+        offset_x: int,
+        offset_y: int,
+        grid: ArenaGrid,
+    ) -> List[RawDetection]:
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 2))
+        connected = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        bars: List[Tuple[int, int, int, int]] = []
+        for cnt in contours:
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            # Health bars are thin horizontal strips (width >= 11px, height 2..11px, aspect >= 2.1)
+            if bw < 11 or bw > 95 or bh < 2 or bh > 12:
+                continue
+            if (bw / float(max(1, bh))) < 2.1:
+                continue
+            bars.append((bx + offset_x, by + offset_y, bw, bh))
+
+        results: List[RawDetection] = []
+        for px, py, bw, bh in bars:
+            # Troop feet sit roughly 22..32 px below its floating health bar
+            foot_x = px + 0.5 * bw
+            foot_y = py + 26.0
+            tx, ty = grid.pixel_to_tile(foot_x, foot_y)
+
+            # Estimate weight class from health bar pixel span on 720p width
+            if bw >= 48:
+                w_cls = WeightClass.HEAVY_TANK
+                label = "unknown_tank"
+                hp_est = min(1.0, bw / 62.0)
+            elif bw >= 28:
+                w_cls = WeightClass.MEDIUM
+                label = "unknown_medium"
+                hp_est = min(1.0, bw / 38.0)
+            elif bw >= 18:
+                w_cls = WeightClass.LIGHT
+                label = "unknown_light"
+                hp_est = min(1.0, bw / 24.0)
+            else:
+                w_cls = WeightClass.SWARM
+                label = "unknown_swarm"
+                hp_est = 1.0
+
+            bbox = (px - 8, py, px + bw + 8, int(py + 38))
+            results.append(
+                RawDetection(
+                    name=label,
+                    side=side,
+                    tile_x=tx,
+                    tile_y=ty,
+                    pixel_bbox=bbox,
+                    confidence=0.65,
+                    hp_ratio=round(hp_est, 2),
+                    move_type=MoveType.GROUND,
+                    weight_class=w_cls,
+                    source="opencv",
+                )
+            )
+        return results
+
+    @staticmethod
+    def infer_side_around_bbox(frame_bgr: np.ndarray, bbox: Tuple[int, int, int, int]) -> Side:
+        h, w = frame_bgr.shape[:2]
+        x1, y1, x2, _ = bbox
+        head = frame_bgr[max(0, y1 - 18) : min(h, y1 + 14), max(0, x1 - 6) : min(w, x2 + 6)]
+        if head.size == 0:
+            return Side.ENEMY
+        hsv = cv2.cvtColor(head, cv2.COLOR_BGR2HSV)
+        red = cv2.inRange(hsv, np.array([0, 110, 110]), np.array([10, 255, 255])) | cv2.inRange(
+            hsv, np.array([168, 110, 110]), np.array([179, 255, 255])
+        )
+        blue = cv2.inRange(hsv, np.array([92, 100, 110]), np.array([118, 255, 255]))
+        return Side.ALLY if np.count_nonzero(blue) > np.count_nonzero(red) else Side.ENEMY
+
+
+class HybridArenaDetector:
+    """Fuses YOLOv8/ONNX detections with OpenCV health-bar detections and tracks unit velocities."""
+
+    MAX_MATCH_TILE_DIST = 2.7
+    TRACK_TTL_SEC = 0.85
+
+    def __init__(
+        self,
+        grid: ArenaGrid,
+        yolo_weights_path: Optional[str] = None,
+        yolo_conf: float = 0.42,
+        enable_opencv_fallback: bool = True,
+    ) -> None:
+        self.grid = grid
+        self.yolo = YOLOBackend(yolo_weights_path, conf_threshold=yolo_conf)
+        self.cv_fallback = OpenCVHealthBarBackend() if enable_opencv_fallback else None
+        self._tracks: Dict[int, DetectedUnit] = {}
+        self._next_track_id: int = 1
+
+    def reset(self) -> None:
+        self._tracks.clear()
+        self._next_track_id = 1
+
+    def detect_and_track(self, frame_bgr: np.ndarray, now_ts: float) -> List[DetectedUnit]:
+        yolo_dets = self.yolo.detect(frame_bgr, self.grid) if self.yolo.is_active else []
+        cv_dets = self.cv_fallback.detect(frame_bgr, self.grid) if self.cv_fallback else []
+
+        fused = self._fuse_detections(yolo_dets, cv_dets)
+        return self._update_tracks(fused, now_ts)
+
+    @staticmethod
+    def _fuse_detections(yolo_dets: List[RawDetection], cv_dets: List[RawDetection]) -> List[RawDetection]:
+        if not yolo_dets:
+            return cv_dets
+        if not cv_dets:
+            return yolo_dets
+
+        merged: List[RawDetection] = []
+        used_cv = set()
+        for yd in yolo_dets:
+            best_cv_idx = None
+            best_dist = 1.6
+            for i, cd in enumerate(cv_dets):
+                if i in used_cv or cd.side != yd.side:
+                    continue
+                d = math.hypot(yd.tile_x - cd.tile_x, yd.tile_y - cd.tile_y)
+                if d < best_dist:
+                    best_dist = d
+                    best_cv_idx = i
+            if best_cv_idx is not None:
+                used_cv.add(best_cv_idx)
+                cd = cv_dets[best_cv_idx]
+                merged.append(
+                    RawDetection(
+                        name=yd.name,
+                        side=yd.side,
+                        tile_x=yd.tile_x,
+                        tile_y=yd.tile_y,
+                        pixel_bbox=yd.pixel_bbox,
+                        confidence=yd.confidence,
+                        hp_ratio=cd.hp_ratio,
+                        move_type=yd.move_type,
+                        weight_class=yd.weight_class,
+                        source="fused",
+                    )
+                )
+            else:
+                merged.append(yd)
+
+        # Keep any unmatched OpenCV health-bar detections so zero enemy pushes slip through unseen!
+        for i, cd in enumerate(cv_dets):
+            if i not in used_cv:
+                merged.append(cd)
+        return merged
+
+    def _update_tracks(self, detections: List[RawDetection], now_ts: float) -> List[DetectedUnit]:
+        unmatched_tracks = set(self._tracks.keys())
+        unmatched_dets = set(range(len(detections)))
+
+        # Greedy nearest-neighbor matching in tile space within same Side
+        pairs: List[Tuple[float, int, int]] = []
+        for tid in unmatched_tracks:
+            tr = self._tracks[tid]
+            for didx in unmatched_dets:
+                det = detections[didx]
+                if tr.side != det.side:
+                    continue
+                dist = math.hypot(tr.tile_x - det.tile_x, tr.tile_y - det.tile_y)
+                if dist <= self.MAX_MATCH_TILE_DIST:
+                    pairs.append((dist, tid, didx))
+
+        pairs.sort(key=lambda x: x[0])
+        for _, tid, didx in pairs:
+            if tid not in unmatched_tracks or didx not in unmatched_dets:
+                continue
+            unmatched_tracks.remove(tid)
+            unmatched_dets.remove(didx)
+
+            tr = self._tracks[tid]
+            det = detections[didx]
+            dt = max(0.04, now_ts - tr.last_seen_ts)
+            inst_vx = (det.tile_x - tr.tile_x) / dt
+            inst_vy = (det.tile_y - tr.tile_y) / dt
+
+            # Exponential moving average velocity smoothing
+            tr.vx = round(0.55 * tr.vx + 0.45 * inst_vx, 2)
+            tr.vy = round(0.55 * tr.vy + 0.45 * inst_vy, 2)
+            tr.tile_x = round(det.tile_x, 2)
+            tr.tile_y = round(det.tile_y, 2)
+            tr.pixel_bbox = det.pixel_bbox
+            tr.hp_ratio = det.hp_ratio
+            tr.confidence = det.confidence
+            tr.last_seen_ts = now_ts
+            tr.source = det.source
+
+            # Preserve specific YOLO identity if fallback only returned generic `unknown_*`
+            if not det.name.startswith("unknown_"):
+                tr.name = det.name
+                tr.move_type = det.move_type
+                tr.weight_class = det.weight_class
+            elif tr.name.startswith("unknown_"):
+                # Upgrade generic classification using observed speed/river crossing!
+                self._refine_generic_class(tr)
+
+        # Spawn new tracks for unmatched detections
+        for didx in unmatched_dets:
+            det = detections[didx]
+            tid = self._next_track_id
+            self._next_track_id += 1
+            self._tracks[tid] = DetectedUnit(
+                track_id=tid,
+                name=det.name,
+                side=det.side,
+                tile_x=round(det.tile_x, 2),
+                tile_y=round(det.tile_y, 2),
+                pixel_bbox=det.pixel_bbox,
+                confidence=det.confidence,
+                hp_ratio=det.hp_ratio,
+                move_type=det.move_type,
+                weight_class=det.weight_class,
+                vx=0.0,
+                vy=0.0,
+                first_seen_ts=now_ts,
+                last_seen_ts=now_ts,
+                source=det.source,
+            )
+
+        # Expire stale tracks
+        expired = [
+            tid for tid, tr in self._tracks.items() if (now_ts - tr.last_seen_ts) > self.TRACK_TTL_SEC
+        ]
+        for tid in expired:
+            del self._tracks[tid]
+
+        # Return currently active or very recently seen (< 0.35s) units
+        return [
+            tr for tr in self._tracks.values() if (now_ts - tr.last_seen_ts) <= 0.35
+        ]
+
+    @staticmethod
+    def _refine_generic_class(unit: DetectedUnit) -> None:
+        """Infer air vs ground rusher on OpenCV-only tracks from river position & speed."""
+        speed = math.hypot(unit.vx, unit.vy)
+        # Crossing river far from bridges (bridges are at x~3.5 and x~14.5) => must be AIR or Miner/Barrel!
+        in_river_band = 14.8 <= unit.tile_y <= 17.2
+        away_from_bridges = not (2.0 <= unit.tile_x <= 5.2 or 12.8 <= unit.tile_x <= 16.0)
+        if in_river_band and away_from_bridges and speed >= 1.2:
+            unit.move_type = MoveType.AIR
+            unit.name = "unknown_air"

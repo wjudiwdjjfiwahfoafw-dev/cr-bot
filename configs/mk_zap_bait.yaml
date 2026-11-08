@@ -1,0 +1,41 @@
+# Clash Royale Tactical Bot Configuration
+# Tailored for Mega Knight + Miner + Skeleton Barrel Zap Bait (3.3 Avg Elixir)
+
+deck:
+  - mega_knight       # 7 elixir - Defensive stomp & counterpush tank (never cycle dry in 1x!)
+  - miner             # 3 elixir - Anti-Tornado chip, Skelly Barrel tank-swap, support sniper
+  - inferno_dragon    # 4 elixir - Melts P.E.K.K.A, Golem, Giant, RG, Lava Hound + baits Zap
+  - skeleton_barrel   # 3 elixir - Primary Zap-bait win condition + death damage
+  - zap               # 2 elixir - Resets Inferno/Sparky, clears swarms, retargets tower onto Miner
+  - bats              # 2 elixir - High-DPS air defense + lethal counterpush behind Miner/MK
+  - spear_goblins     # 2 elixir - Split cycle, bridge chip, center-pull kiting vs melee killers
+  - goblin_gang       # 3 elixir ("goblin army") - Ground swarm defense, Prince/Hog surround, bait
+                      # Tip: If you run Skeleton Army instead of Goblin Gang, change to `skeleton_army`
+
+evolutions:
+  - mega_knight
+  - bats
+
+loop_hz: 12.0
+auto_queue_battle: false   # Set true to automatically click Battle & OK between matches
+
+adb:
+  adb_path: "adb"
+  serial: null             # Auto-discovers BlueStacks (5555+), LDPlayer, MEmu, MuMu if null
+  target_width: 720
+  target_height: 1280
+  human_jitter_px: 4       # Subtle Gaussian pixel randomization on taps
+
+vision:
+  templates_dir: "assets/card_templates"
+  yolo_weights_path: "weights/clash_yolov8n.onnx"   # Supports .onnx or Ultralytics .pt; auto-falls back to OpenCV if absent
+  yolo_confidence: 0.42
+  enable_opencv_fallback: true                      # Tracks enemy health bars, velocity & clusters even without YOLO weights
+
+tactics:
+  tower_level: 11
+  min_action_cooldown_sec: 0.65
+  mk_min_stomp_elixir_value: 4.0   # Minimum ground cluster threat required before committing Mega Knight stomp
+  leak_prevention_elixir: 9.3      # Proactive cycle/chip threshold so we never leak elixir
+  bait_window_seconds: 11.0        # Aggressive swarm/barrel window after opponent spends Log/Zap/Arrows
+  overtime_spell_finish_hp: 380    # Aggressive Miner + Zap finish threshold on low-HP Princess Towers
